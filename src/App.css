@@ -1,0 +1,132 @@
+#root {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+/* Estilos para melhorar a visibilidade e funcionalidade */
+button,
+.btn {
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  position: relative !important;
+  z-index: 10 !important;
+}
+
+/* Garantir que todos os elementos interativos sejam visíveis */
+a,
+button,
+input,
+select,
+textarea {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Melhorar contraste e visibilidade */
+.text-foreground {
+  color: hsl(var(--foreground)) !important;
+}
+
+.text-muted-foreground {
+  color: hsl(var(--muted-foreground)) !important;
+}
+
+/* Garantir que cards e seções sejam visíveis */
+.card,
+section {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Melhorar hover states */
+.card-hover:hover {
+  transform: translateY(-4px) !important;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Garantir que gradientes sejam visíveis */
+.gradient-text {
+  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--secondary))) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+}
+
+/* Melhorar animações */
+.floating {
+  animation: floating 3s ease-in-out infinite !important;
+}
+
+@keyframes floating {
+
+  0%,
+  100% {
+    transform: translate(0, 0px);
+  }
+
+  50% {
+    transform: translate(0, -10px);
+  }
+}
+
+/* Garantir que o container seja responsivo */
+.container-custom {
+  width: 100% !important;
+  max-width: 1200px !important;
+  margin: 0 auto !important;
+  padding: 0 1rem !important;
+}
+
+@media (min-width: 640px) {
+  .container-custom {
+    padding: 0 1.5rem !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  .container-custom {
+    padding: 0 2rem !important;
+  }
+}
