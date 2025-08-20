@@ -373,59 +373,51 @@ const Chat = () => {
     trackClick(`generate-${type}`, '/chat');
     
     try {
-      // Obter conteúdo por página do primeiro PDF disponível
+      // Primeiro: tentar geração pela IA no backend (lê/aprende os PDFs)
+      const prompts: Record<string, string> = {
+        flashcard: 'Leia e aprenda os PDFs do usuário e gere exatamente 10 flashcards (pergunta e resposta concisa) baseados no conteúdo aprendido. Retorne somente JSON {"cards": [{"id":"1","question":"...","answer":"..."}]}',
+        resume: 'Leia e aprenda os PDFs do usuário e gere um resumo completo, educativo e profissional em Markdown, com títulos, subtítulos e listas. Retorne {"content":"...markdown..."}',
+        quiz: 'Leia e aprenda os PDFs do usuário e gere exatamente 10 questões de múltipla escolha baseadas no conteúdo, com 4 alternativas e explicação. Retorne somente JSON {"questions": [{"id":"1","question":"...","options":["A","B","C","D"],"correctAnswer":0,"explanation":"..."}]}',
+        prova: 'Leia e aprenda os PDFs do usuário e gere uma prova com exatamente 20 questões de múltipla escolha (4 alternativas, uma correta, 1 ponto cada). Retorne somente JSON {"multipleChoice": [{"id":"1","question":"...","options":["A","B","C","D"],"correctAnswer":0,"points":1}]}'
+      };
+
+      const { data: resp, error } = await supabase.functions.invoke('ai-processor', {
+        body: { action: 'generate_content', type, prompt: prompts[type] }
+      });
+
+      if (!error && resp?.success && resp?.content) {
+        setGeneratedContent(resp.content);
+        setCurrentView(type);
+        const typeNames = { flashcard: 'Flashcards', resume: 'Resumo', quiz: 'Quiz', prova: 'Prova' } as const;
+        toast({ title: `${typeNames[type]} gerado com sucesso!`, description: `${typeNames[type]} criado com base nos seus PDFs.` });
+        return;
+      }
+
+      // Fallback: geração local no front caso a edge falhe
       const firstPdf = availablePDFs[0];
       let pages: string[] = [];
       if (firstPdf?.json_content?.pages?.length) {
         pages = firstPdf.json_content.pages.map((p: any) => p.content || '').filter((t: string) => t.trim().length > 0);
       } else if (firstPdf?.extracted_content) {
         pages = splitExtractedIntoPages(firstPdf.extracted_content);
-      } else {
-        // Tentar converter para JSON via função que não usa IA
-        try {
-          const { data: conv } = await supabase.functions.invoke('pdf-to-json', {
-            body: { action: 'convert_to_json', pdfId: firstPdf.id }
-          });
-          if (conv?.success && conv.json_content?.pages?.length) {
-            pages = conv.json_content.pages.map((p: any) => p.content || '').filter((t: string) => t.trim().length > 0);
-          }
-        } catch (_) {}
       }
-
-      if (pages.length === 0) {
-        throw new Error('Não foi possível preparar o conteúdo do PDF no front.');
-      }
+      if (pages.length === 0) throw new Error('Falha na geração pela IA e fallback indisponível.');
 
       let content: any = null;
       if (type === 'flashcard') content = generateFlashcardsFromPages(pages, 10);
       if (type === 'quiz') content = generateQuizFromPages(pages, 10);
       if (type === 'prova') content = generateExamFromPages(pages, 20);
       if (type === 'resume') content = generateResumeFromPages(pages);
-
       if (!content) throw new Error('Geração indisponível.');
 
       setGeneratedContent(content);
       setCurrentView(type);
-
-      const typeNames = {
-        flashcard: 'Flashcards',
-        resume: 'Resumo',
-        quiz: 'Quiz',
-        prova: 'Prova'
-      };
-
-      toast({
-        title: `${typeNames[type]} gerado com sucesso!`,
-        description: `${typeNames[type]} criado com base nos seus PDFs.`,
-      });
+      const typeNames = { flashcard: 'Flashcards', resume: 'Resumo', quiz: 'Quiz', prova: 'Prova' } as const;
+      toast({ title: `${typeNames[type]} (fallback)`, description: `Conteúdo criado localmente a partir do PDF.` });
 
     } catch (error) {
       console.error('Generation error:', error);
-      toast({
-        title: "Erro na geração",
-        description: error instanceof Error ? error.message : 'Erro desconhecido',
-        variant: "destructive"
-      });
+      toast({ title: 'Erro na geração', description: error instanceof Error ? error.message : 'Erro desconhecido', variant: 'destructive' });
     } finally {
       setIsGenerating(null);
     }
