@@ -568,23 +568,7 @@ const Chat = () => {
     );
   }
 
-  if (currentView === 'dieta' && generatedContent?.days) {
-    return (
-      <div className="min-h-screen bg-background p-6">
-        <div className="max-w-4xl mx-auto">
-          <Button 
-            variant="ghost" 
-            onClick={goBackToChat}
-            className="mb-6"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Voltar ao Chat
-          </Button>
-          <DietPlanViewer dietPlan={generatedContent} />
-        </div>
-      </div>
-    );
-  }
+  
 
   // Main chat interface
   return (
@@ -731,23 +715,7 @@ const Chat = () => {
                   )}
                 </Button>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-2"
-                  onClick={() => generateContent('dieta')}
-                  disabled={!!isGenerating}
-                >
-                  <Utensils className="w-4 h-4" />
-                  {isGenerating === 'dieta' ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Gerando...
-                    </>
-                  ) : (
-                    'Gerar Dieta'
-                  )}
-                </Button>
+                {/* Botão de dieta removido - acesse via página Saúde */}
               </div>
             </div>
 
