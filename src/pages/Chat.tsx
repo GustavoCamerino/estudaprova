@@ -18,7 +18,6 @@ import {
   Upload,
   Crown,
   MessageCircle,
-  Utensils,
   CheckCircle,
   Loader2,
   ArrowLeft
@@ -53,7 +52,7 @@ const Chat = () => {
   const { extractTextFromPDF, isExtracting } = usePDFExtractor();
   
   // State management
-  const [currentView, setCurrentView] = useState<'chat' | 'flashcard' | 'resume' | 'quiz' | 'prova' | 'dieta'>('chat');
+  const [currentView, setCurrentView] = useState<'chat' | 'flashcard' | 'resume' | 'quiz' | 'prova'>('chat');
   const [generatedContent, setGeneratedContent] = useState<any>(null);
   const [pdfProcessed, setPdfProcessed] = useState(false);
   const [availablePDFs, setAvailablePDFs] = useState<PDFWithJSON[]>([]);
@@ -116,45 +115,65 @@ const Chat = () => {
       .replace(/\s+/g, ' ')
       .split(/(?<=[\.!?])\s+/)
       .map(s => s.trim())
-      .filter(s => s.length > 40);
+      .filter(s => s.length > 40 && /[a-zA-ZÀ-ÿ]/.test(s));
   };
+
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9à-ÿ]+/gi, ' ').trim().slice(0, 120);
 
   const generateFlashcardsFromPages = (pages: string[], maxCards: number = 10) => {
     const cards: any[] = [];
+    const used = new Set<string>();
     for (let i = 0; i < pages.length && cards.length < maxCards; i++) {
       const sentences = extractSentences(pages[i]);
       if (sentences.length === 0) continue;
-      const sentence = sentences[0];
-      const question = sentence.length > 120 ? 'Qual é a ideia principal desta parte do conteúdo?' : `O que significa: "${sentence.replace(/\"/g, '"')}"?`;
-      const answer = sentence;
-      cards.push({ id: (cards.length + 1).toString(), question, answer });
+      const candidate = sentences[0];
+      const key = normalize(candidate);
+      if (used.has(key)) continue;
+      used.add(key);
+      const q = `Página ${i + 1}: O que significa este trecho?`;
+      const a = candidate.length > 280 ? candidate.slice(0, 277) + '...' : candidate;
+      cards.push({ id: (cards.length + 1).toString(), question: q, answer: a });
     }
-    // completar se faltou
+    let fillerIndex = 0;
     while (cards.length < maxCards && pages.length > 0) {
-      cards.push({ id: (cards.length + 1).toString(), question: 'Qual é o tema principal do documento?', answer: 'O tema principal está relacionado ao conteúdo estudado no PDF.' });
+      const q = `Página ${((fillerIndex % pages.length) + 1)}: Qual é a ideia principal desta seção?`;
+      const a = 'A ideia principal relaciona-se aos conceitos apresentados nesta página do documento.';
+      cards.push({ id: (cards.length + 1).toString(), question: q, answer: a });
+      fillerIndex++;
     }
     return { cards };
   };
 
   const pickOptions = (correct: string): string[] => {
-    const base = [
-      correct,
-      'Afirmação parcialmente relacionada',
-      'Conceito alternativo do tema',
-      'Opção irrelevante ao contexto'
+    const clean = (s: string) => s.replace(/\s+/g, ' ').trim();
+    const opts = [clean(correct)];
+    const pool = [
+      'Afirmação parcialmente relacionada ao tema',
+      'Conceito alternativo apresentado no texto',
+      'Ideia semelhante porém incorreta no contexto',
+      'Opção não suportada pelo conteúdo'
     ];
-    return base.slice(0, 4);
+    for (const p of pool) {
+      if (opts.length >= 4) break;
+      if (!opts.includes(p)) opts.push(p);
+    }
+    return opts.slice(0, 4);
   };
 
   const generateQuizFromPages = (pages: string[], total: number = 10) => {
     const questions: any[] = [];
+    const used = new Set<string>();
     let pageIndex = 0;
     while (questions.length < total && pages.length > 0) {
       const page = pages[pageIndex % pages.length];
       const sentences = extractSentences(page);
       if (sentences.length > 0) {
-        const stem = sentences[0].length > 120 ? 'Qual é a melhor interpretação deste trecho?' : `Sobre o trecho: "${sentences[0].replace(/\"/g, '"')}", qual alternativa está correta?`;
-        const correct = sentences[0];
+        const first = sentences[0];
+        const key = normalize(first);
+        if (used.has(key)) { pageIndex++; continue; }
+        used.add(key);
+        const stem = `Trecho (Página ${((pageIndex % pages.length) + 1)}): ${first.length > 160 ? first.slice(0, 157) + '...' : first}\n\nQual alternativa está correta?`;
+        const correct = first;
         const options = pickOptions(correct);
         questions.push({
           id: (questions.length + 1).toString(),
@@ -170,7 +189,7 @@ const Chat = () => {
     while (questions.length < total) {
       questions.push({
         id: (questions.length + 1).toString(),
-        question: 'Qual conceito melhor resume o conteúdo estudado?',
+        question: 'Qual conceito melhor resume o conteúdo estudado?\n\nEscolha a alternativa correta.',
         options: ['Conceito A', 'Conceito B', 'Conceito C', 'Conceito D'],
         correctAnswer: 0,
         explanation: 'Essa questão foi gerada automaticamente para completar o quiz.'
@@ -181,13 +200,18 @@ const Chat = () => {
 
   const generateExamFromPages = (pages: string[], total: number = 20) => {
     const multipleChoice: any[] = [];
+    const used = new Set<string>();
     let pageIndex = 0;
     while (multipleChoice.length < total && pages.length > 0) {
       const page = pages[pageIndex % pages.length];
       const sentences = extractSentences(page);
       if (sentences.length > 0) {
-        const stem = sentences[0].length > 120 ? 'Selecione a alternativa que melhor representa o trecho a seguir.' : `Com base no trecho: "${sentences[0].replace(/\"/g, '"')}", escolha a alternativa correta.`;
-        const correct = sentences[0];
+        const first = sentences[0];
+        const key = normalize(first);
+        if (used.has(key)) { pageIndex++; continue; }
+        used.add(key);
+        const stem = `Trecho (Página ${((pageIndex % pages.length) + 1)}): ${first.length > 160 ? first.slice(0, 157) + '...' : first}\n\nEscolha a alternativa correta.`;
+        const correct = first;
         const options = pickOptions(correct);
         multipleChoice.push({
           id: (multipleChoice.length + 1).toString(),
@@ -222,27 +246,7 @@ const Chat = () => {
     return { content };
   };
 
-  const generateDietPlanLocal = () => {
-    const today = new Date();
-    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-    const dateStr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    const baseMeals = [
-      { time: '07:00', name: 'Pão integral com ovos mexidos e fruta', calories: 380 },
-      { time: '10:00', name: 'Iogurte natural com granola', calories: 220 },
-      { time: '13:00', name: 'Arroz, feijão, frango grelhado e salada', calories: 600 },
-      { time: '16:00', name: 'Castanhas e 1 maçã', calories: 250 },
-      { time: '19:00', name: 'Sopa de legumes com carne magra', calories: 450 }
-    ];
-    const days = Array.from({ length: 7 }).map((_, i) => {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
-      return {
-        date: dateStr(d),
-        meals: baseMeals
-      };
-    });
-    return { days };
-  };
+  // Dieta removida do Chat. Utilize a página Saúde para gerar dieta.
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -353,7 +357,7 @@ const Chat = () => {
     noClick: false
   });
 
-  const generateContent = async (type: 'flashcard' | 'resume' | 'quiz' | 'prova' | 'dieta') => {
+  const generateContent = async (type: 'flashcard' | 'resume' | 'quiz' | 'prova') => {
     if (!pdfProcessed || availablePDFs.length === 0) {
       toast({
         title: "Nenhum PDF encontrado",
@@ -395,7 +399,6 @@ const Chat = () => {
       if (type === 'quiz') content = generateQuizFromPages(pages, 10);
       if (type === 'prova') content = generateExamFromPages(pages, 20);
       if (type === 'resume') content = generateResumeFromPages(pages);
-      if (type === 'dieta') content = generateDietPlanLocal();
 
       if (!content) throw new Error('Geração indisponível.');
 
@@ -406,8 +409,7 @@ const Chat = () => {
         flashcard: 'Flashcards',
         resume: 'Resumo',
         quiz: 'Quiz',
-        prova: 'Prova',
-        dieta: 'Plano Alimentar'
+        prova: 'Prova'
       };
 
       toast({
