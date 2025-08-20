@@ -603,30 +603,27 @@ async function generateContent(type: string, prompt: string, userId: string, sup
 
 // Função para gerar flashcards a partir do conteúdo dos PDFs
 async function generateFlashcards(pdfContent: string, prompt: string) {
-  const aiPrompt = `VOCÊ É UM ESPECIALISTA EDUCACIONAL QUE ESTUDOU COMPLETAMENTE TODOS OS DOCUMENTOS FORNECIDOS.
+  const aiPrompt = `VOCÊ É UM ESPECIALISTA EDUCACIONAL que deve criar flashcards educacionais de alta qualidade.
 
-MATERIAL ESTUDADO:
+CONTEÚDO DO PDF PARA ANÁLISE:
 ${pdfContent}
 
-TAREFA: Criar 10 flashcards educacionais de alta qualidade sobre: ${prompt}
+TAREFA: Criar exatamente 10 flashcards baseados no conteúdo acima.
 
 INSTRUÇÕES CRÍTICAS:
-- VOCÊ JÁ ESTUDOU E COMPREENDE COMPLETAMENTE todo o material dos PDFs
-- Crie exatamente 10 flashcards baseados ESPECIFICAMENTE no conteúdo dos documentos
-- Cada pergunta deve ser ESPECÍFICA e DETALHADA sobre conceitos, definições, processos ou informações dos PDFs
-- As respostas devem ser COMPLETAS, PRECISAS e baseadas diretamente no material estudado
-- Inclua detalhes técnicos, exemplos específicos e informações contextuais dos documentos
-- NÃO faça perguntas genéricas - todas devem ser sobre o conteúdo ESPECÍFICO dos PDFs
-- Use terminologia exata e informações precisas dos documentos
+1. Crie exatamente 10 flashcards
+2. Cada pergunta deve ser específica sobre o conteúdo do PDF
+3. Respostas devem ser completas e educativas
+4. Use informações diretas do documento
+5. Varie entre conceitos, definições e aplicações
 
-Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
+RESPONDA APENAS COM ESTE JSON (sem texto adicional):
 {
-  "type": "flashcard",
   "cards": [
     {
       "id": "1",
-      "question": "Pergunta específica sobre o conteúdo?",
-      "answer": "Resposta detalhada baseada no material."
+      "question": "Pergunta clara e específica?",
+      "answer": "Resposta completa e educativa."
     }
   ]
 }`;
@@ -638,7 +635,7 @@ Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed.type === 'flashcard' && parsed.cards) {
+      if (parsed.cards && Array.isArray(parsed.cards)) {
         return parsed;
       }
     } catch (e) {
@@ -647,11 +644,10 @@ Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
   }
 
   return {
-    type: 'flashcard',
     cards: [
       {
         id: '1',
-        question: 'Qual é o tema principal do conteúdo estudado?',
+        question: 'Qual é o tema principal abordado no documento?',
         answer: aiResponse.substring(0, 300).replace(/[{}"\[\]]/g, '') + '...'
       }
     ]
@@ -660,25 +656,22 @@ Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
 
 // Função para gerar resumos a partir do conteúdo dos PDFs
 async function generateResume(pdfContent: string, prompt: string) {
-  const aiPrompt = `VOCÊ É UM ESPECIALISTA QUE ESTUDOU MINUCIOSAMENTE TODOS OS DOCUMENTOS FORNECIDOS.
+  const aiPrompt = `Você é um especialista em criar resumos educacionais claros e organizados.
 
-MATERIAL COMPLETAMENTE ANALISADO:
+CONTEÚDO DO PDF:
 ${pdfContent}
 
-TAREFA: Criar um resumo COMPLETO e DETALHADO sobre: ${prompt}
+TAREFA: Criar um resumo completo e bem estruturado do conteúdo acima.
 
 INSTRUÇÕES CRÍTICAS:
-- VOCÊ DOMINA COMPLETAMENTE todo o conteúdo dos PDFs fornecidos
-- Analise e extraia TODAS as informações relevantes dos documentos
-- Crie um resumo ABRANGENTE que demonstre conhecimento profundo do material
-- Inclua TODOS os conceitos principais, definições, processos, métodos e conclusões
-- Use formato markdown com estrutura clara: títulos, subtítulos, listas e destaques
-- Inclua exemplos específicos, dados, tabelas e informações técnicas dos PDFs
-- Detalhe conexões entre conceitos e implicações práticas
-- Organize o conteúdo de forma didática e compreensível
-- NÃO seja superficial - demonstre conhecimento profundo e específico do material
+1. Use formatação markdown (# ## ### **texto** *texto*)
+2. Organize em seções lógicas com títulos claros
+3. Inclua os conceitos principais e definições importantes
+4. Use listas e tópicos para melhor organização
+5. Destaque informações importantes com **negrito**
+6. Mantenha linguagem clara e didática
 
-Responda APENAS com o resumo em texto limpo, sem JSON, sem código, apenas o conteúdo do resumo formatado em markdown.`;
+RESPONDA APENAS com o resumo em markdown, sem JSON ou código:`;
 
   const aiResponse = await callGeminiAPI('', aiPrompt);
   console.log('Resposta bruta da IA para resumo:', aiResponse);
@@ -693,43 +686,36 @@ Responda APENAS com o resumo em texto limpo, sem JSON, sem código, apenas o con
     .trim();
 
   return {
-    type: 'resume',
-    title: 'Resumo Detalhado do Conteúdo',
     content: cleanContent
   };
 }
 
 // Função para gerar quizzes a partir do conteúdo dos PDFs
 async function generateQuiz(pdfContent: string, prompt: string) {
-  const aiPrompt = `VOCÊ É UM ESPECIALISTA EDUCACIONAL QUE DOMINA COMPLETAMENTE O MATERIAL ESTUDADO.
+  const aiPrompt = `Você é um especialista em criar quizzes educacionais.
 
-CONTEÚDO COMPLETAMENTE ANALISADO:
+CONTEÚDO DO PDF:
 ${pdfContent}
 
-TAREFA: Criar um quiz ESPECÍFICO com 10 questões sobre: ${prompt}
+TAREFA: Criar um quiz com exatamente 10 questões de múltipla escolha.
 
 INSTRUÇÕES CRÍTICAS:
-- VOCÊ CONHECE PROFUNDAMENTE todo o conteúdo dos PDFs
-- Crie exatamente 10 questões de múltipla escolha ESPECÍFICAS sobre o material
-- 4 alternativas cada (A, B, C, D) baseadas no conteúdo real dos documentos
-- Apenas uma alternativa correta por questão
-- Questões devem testar conhecimento ESPECÍFICO dos PDFs (conceitos, definições, processos, dados)
-- Alternativas incorretas devem ser plausíveis mas claramente distintas da correta
-- Inclua explicação DETALHADA para cada resposta correta, citando informações dos PDFs
-- Varie o nível de dificuldade: conceitos básicos, aplicações e análises complexas
-- Use terminologia exata e informações precisas dos documentos
+1. Exatamente 10 questões de múltipla escolha
+2. 4 alternativas cada (A, B, C, D)
+3. Apenas uma alternativa correta
+4. Questões baseadas no conteúdo do PDF
+5. Inclua explicação para cada resposta
+6. Varie a dificuldade das questões
 
-Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
+RESPONDA APENAS COM ESTE JSON:
 {
-  "type": "quiz",
-  "title": "Quiz do Conteúdo",
   "questions": [
     {
       "id": "1",
-      "question": "Pergunta específica sobre o conteúdo?",
-      "options": ["Opção A correta", "Opção B incorreta", "Opção C incorreta", "Opção D incorreta"],
+      "question": "Pergunta clara sobre o conteúdo?",
+      "options": ["Opção A", "Opção B", "Opção C", "Opção D"],
       "correctAnswer": 0,
-      "explanation": "Explicação detalhada da resposta correta."
+      "explanation": "Explicação da resposta correta."
     }
   ]
 }`;
@@ -741,7 +727,7 @@ Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed.type === 'quiz' && parsed.questions) {
+      if (parsed.questions && Array.isArray(parsed.questions)) {
         return parsed;
       }
     } catch (e) {
@@ -750,15 +736,13 @@ Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
   }
 
   return {
-    type: 'quiz',
-    title: 'Quiz do Conteúdo',
     questions: [
       {
         id: '1',
-        question: 'Baseado no conteúdo, qual o tema principal abordado?',
+        question: 'Com base no conteúdo do PDF, qual é o tema principal abordado?',
         options: ['Efeitos anti-inflamatórios', 'Pesquisa clínica', 'Desenvolvimento farmacológico', 'Análise química'],
         correctAnswer: 0,
-        explanation: 'Com base no conteúdo analisado, o foco principal é nos efeitos anti-inflamatórios.'
+        explanation: 'Baseado na análise do documento, o foco principal está nos efeitos anti-inflamatórios.'
       }
     ]
   };
@@ -766,34 +750,28 @@ Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
 
 // Função para gerar provas a partir do conteúdo dos PDFs
 async function generateExam(pdfContent: string, prompt: string) {
-  const aiPrompt = `VOCÊ É UM PROFESSOR ESPECIALISTA QUE DOMINA COMPLETAMENTE O MATERIAL DOS DOCUMENTOS.
+  const aiPrompt = `Você é um professor especialista em criar provas acadêmicas.
 
-MATERIAL COMPLETAMENTE ESTUDADO:
+CONTEÚDO DO PDF:
 ${pdfContent}
 
-TAREFA: Criar uma prova RIGOROSA com 20 questões sobre: ${prompt}
+TAREFA: Criar uma prova com exatamente 20 questões de múltipla escolha.
 
 INSTRUÇÕES CRÍTICAS:
-- VOCÊ TEM CONHECIMENTO COMPLETO E PROFUNDO de todo o conteúdo dos PDFs
-- Crie exatamente 20 questões de múltipla escolha de NÍVEL ACADÊMICO
-- 4 alternativas cada (A, B, C, D) baseadas rigorosamente no material estudado
-- Apenas uma alternativa correta por questão
-- Questões devem cobrir TODO o espectro do conteúdo: conceitos básicos, intermediários e avançados
-- Inclua questões sobre definições, aplicações práticas, análises críticas e relações conceituais
-- Alternativas incorretas devem ser tecnicamente plausíveis mas claramente distinguíveis
-- Atribua 1 ponto para cada questão (total: 20 pontos)
-- Varie tipos de questão: factual, conceitual, aplicação e análise
-- Use linguagem técnica precisa conforme os documentos
+1. Exatamente 20 questões de múltipla escolha
+2. 4 alternativas cada (A, B, C, D)
+3. Apenas uma alternativa correta
+4. 1 ponto por questão
+5. Questões baseadas no conteúdo do PDF
+6. Varie a dificuldade e tipos de questão
 
-Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
+RESPONDA APENAS COM ESTE JSON:
 {
-  "type": "prova",
-  "title": "Prova do Conteúdo",
   "multipleChoice": [
     {
       "id": "1",
-      "question": "Pergunta específica sobre o conteúdo?",
-      "options": ["Opção A correta", "Opção B incorreta", "Opção C incorreta", "Opção D incorreta"],
+      "question": "Pergunta sobre o conteúdo?",
+      "options": ["Opção A", "Opção B", "Opção C", "Opção D"],
       "correctAnswer": 0,
       "points": 1
     }
@@ -807,7 +785,7 @@ Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed.type === 'prova' && parsed.multipleChoice) {
+      if (parsed.multipleChoice && Array.isArray(parsed.multipleChoice)) {
         return parsed;
       }
     } catch (e) {
@@ -819,7 +797,7 @@ Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
   for (let i = 1; i <= 20; i++) {
     fallbackQuestions.push({
       id: i.toString(),
-      question: `Baseado no conteúdo, qual o foco principal do estudo? (Questão ${i})`,
+      question: `Com base no conteúdo do PDF, qual é o conceito principal abordado? (Questão ${i})`,
       options: ['Efeitos anti-inflamatórios tópicos', 'Pesquisa farmacológica', 'Desenvolvimento clínico', 'Análise química'],
       correctAnswer: 0,
       points: 1
@@ -827,8 +805,6 @@ Formato de resposta (OBRIGATÓRIO - responda APENAS com este JSON):
   }
 
   return {
-    type: 'prova',
-    title: 'Prova do Conteúdo',
     multipleChoice: fallbackQuestions
   };
 }
