@@ -228,30 +228,22 @@ const Chat = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuário não autenticado');
 
-      const pdfContent = availablePDFs
-        .map(pdf => pdf.extracted_content || '')
-        .join('\n\n');
-
-      if (!pdfContent.trim()) {
-        throw new Error('Nenhum conteúdo de PDF disponível');
-      }
-
       let prompt = '';
       switch (type) {
         case 'flashcard':
-          prompt = `Crie exatamente 10 flashcards educacionais baseados no conteúdo do PDF. Cada flashcard deve ter uma pergunta específica e uma resposta detalhada. Formato JSON: {"cards": [{"id": "1", "question": "Pergunta?", "answer": "Resposta detalhada"}]}`;
+          prompt = `Gerar 10 flashcards educacionais de alta qualidade com base nos PDFs do usuário. Formato JSON: {"cards": [{"id": "1", "question": "Pergunta?", "answer": "Resposta detalhada"}]}`;
           break;
         case 'resume':
-          prompt = `Faça um resumo completo e detalhado do conteúdo do PDF. Use formatação markdown com títulos, subtítulos, listas e destaques. Organize o conteúdo de forma didática e estruturada.`;
+          prompt = `Gerar um resumo completo e didático em Markdown dos PDFs do usuário (títulos, subtítulos, listas, destaques).`;
           break;
         case 'quiz':
-          prompt = `Crie um quiz com exatamente 10 questões de múltipla escolha baseado no conteúdo do PDF. Cada questão deve ter 4 alternativas (A, B, C, D) e apenas uma correta. Formato JSON: {"questions": [{"id": "1", "question": "Pergunta?", "options": ["A", "B", "C", "D"], "correctAnswer": 0, "explanation": "Explicação"}]}`;
+          prompt = `Gerar um quiz com 10 questões de múltipla escolha com base nos PDFs do usuário. Formato JSON: {"questions": [{"id": "1", "question": "Pergunta?", "options": ["A", "B", "C", "D"], "correctAnswer": 0, "explanation": "Explicação"}]}`;
           break;
         case 'prova':
-          prompt = `Gere uma prova completa com exatamente 20 questões de múltipla escolha baseada no conteúdo do PDF. Cada questão deve ter 4 alternativas e apenas uma correta. Formato JSON: {"multipleChoice": [{"id": "1", "question": "Pergunta?", "options": ["A", "B", "C", "D"], "correctAnswer": 0, "points": 1}]}`;
+          prompt = `Gerar uma prova com 20 questões de múltipla escolha com base nos PDFs do usuário. Formato JSON: {"multipleChoice": [{"id": "1", "question": "Pergunta?", "options": ["A", "B", "C", "D"], "correctAnswer": 0, "points": 1}]}`;
           break;
         case 'dieta':
-          prompt = `Crie um plano alimentar personalizado de 7 dias baseado em princípios de nutrição saudável. Organize por refeições (café da manhã, lanche manhã, almoço, lanche tarde, jantar) com horários específicos. Formato JSON: {"days": [{"date": "2024-01-01", "meals": [{"name": "Refeição", "time": "07:00", "calories": 300, "description": "Descrição"}]}]}`;
+          prompt = `Gerar um plano alimentar de 7 dias (café, lanche manhã, almoço, lanche tarde, jantar) no formato JSON: {"days": [{"date": "AAAA-MM-DD", "meals": [{"name": "Refeição", "time": "07:00", "calories": 300, "description": "Descrição"}]}]}`;
           break;
       }
 
@@ -259,7 +251,7 @@ const Chat = () => {
         body: { 
           action: 'generate_content',
           type: type,
-          prompt: prompt + '\n\nConteúdo do PDF:\n' + pdfContent.substring(0, 8000)
+          prompt
         }
       });
 

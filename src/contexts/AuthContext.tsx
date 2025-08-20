@@ -7,8 +7,8 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string, fullName: string, captchaToken: string) => Promise<{ error: any }>;
-  signIn: (email: string, password: string, captchaToken: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string, fullName: string) => Promise<{ error: any }>;
+  signIn: (email: string, password: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
   subscription: any;
   refreshSubscription: () => Promise<void>;
@@ -128,17 +128,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (email: string, password: string, fullName: string, captchaToken: string) => {
+  const signUp = async (email: string, password: string, fullName: string) => {
     try {
-      if (!captchaToken) {
-        toast({
-          title: "Erro no cadastro",
-          description: "Por favor, complete o captcha",
-          variant: "destructive",
-        });
-        return { error: new Error("Captcha required") };
-      }
-
       const redirectUrl = `${window.location.origin}/auth-confirmed`;
       
       const { error } = await supabase.auth.signUp({
@@ -148,8 +139,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           emailRedirectTo: redirectUrl,
           data: {
             full_name: fullName,
-          },
-          captchaToken
+          }
         }
       });
 
@@ -178,23 +168,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const signIn = async (email: string, password: string, captchaToken: string) => {
+  const signIn = async (email: string, password: string) => {
     try {
-      if (!captchaToken) {
-        toast({
-          title: "Erro no login",
-          description: "Por favor, complete o captcha",
-          variant: "destructive",
-        });
-        return { error: new Error("Captcha required") };
-      }
-
       const { error } = await supabase.auth.signInWithPassword({
         email,
-        password,
-        options: {
-          captchaToken
-        }
+        password
       });
 
       if (error) {
