@@ -26,7 +26,6 @@ import FlashcardCarousel from '@/components/FlashcardCarousel';
 import ResumeViewer from '@/components/ResumeViewer';
 import QuizInterface from '@/components/QuizInterface';
 import ExamInterface from '@/components/ExamInterface';
-import DietPlanViewer from '@/components/DietPlanViewer';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 
