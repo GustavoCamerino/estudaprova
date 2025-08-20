@@ -33,11 +33,8 @@ import {
   File,
   X,
   Loader2,
-  BookOpen,
-  MessageSquare,
-  Menu
+  BookOpen
 } from 'lucide-react';
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import ChatMessageDialog, { SavedMessage } from '@/components/ChatMessageDialog';
 import FlashcardCarousel from '@/components/FlashcardCarousel';
 import ResumeViewer from '@/components/ResumeViewer';
@@ -72,12 +69,11 @@ const Chat = () => {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState<string | null>(null);
-  const [isStudyingPDF, setIsStudyingPDF] = useState(false);
+  const [isGenerating, setIsGenerating] = useState<string | null>(null); // Track which content is being generated
+  const [isStudyingPDF, setIsStudyingPDF] = useState(false); // Track PDF analysis
   const [dragActive, setDragActive] = useState(false);
   const [availablePDFs, setAvailablePDFs] = useState<PDFWithJSON[]>([]);
   const [selectedPDFId, setSelectedPDFId] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -453,6 +449,15 @@ const Chat = () => {
     }
   };
 
+  const removeFile = (index: number) => {
+    const removedFile = uploadedFiles[index];
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+
+    // Remove from database as well
+    // TODO: Implement file deletion from storage and database
+    console.log('File removed from UI:', removedFile.name);
+  };
+
   const quickPrompts = [
     {
       title: 'Criar Flashcards',
@@ -503,90 +508,118 @@ const Chat = () => {
       id: Date.now().toString(),
       content: input,
       isUser: true,
-      timestamp: new Date(),
-      type: 'normal'
+      timestamp: new Date()
     };
 
     setMessages(prev => [...prev, userMessage]);
+    const currentInput = input;
     setInput('');
     setIsLoading(true);
 
     try {
       // Save user message to database
+      await saveMessageToDatabase(userMessage, currentSessionId, 'normal');
+
+      console.log('Sending message to AI processor:', currentInput);
+
+      // Primeiro, vamos buscar PDFs da sessão atual
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase
-          .from('chat_messages')
-          .insert({
-            session_id: currentSessionId,
-            user_id: user.id,
-            content: input,
-            is_user: true,
-            message_type: 'normal'
-          });
+      if (!user) {
+        throw new Error('Usuário não autenticado');
       }
 
-      // Get PDF content from selected PDF or all PDFs in session
-      let pdfContext = '';
-      if (selectedPDFId) {
-        const selectedPDF = availablePDFs.find(pdf => pdf.id === selectedPDFId);
-        if (selectedPDF && (selectedPDF.json_content || selectedPDF.extracted_content)) {
-          pdfContext = selectedPDF.extracted_content || JSON.stringify(selectedPDF.json_content);
+      // Buscar PDFs da sessão atual
+      const { data: sessionPDFs, error: pdfError } = await supabase
+        .from('pdfs')
+        .select('id, original_name, processing_status, json_content, extracted_content')
+        .eq('user_id', user.id)
+        .eq('session_id', currentSessionId)
+        .order('upload_date', { ascending: false }) as { data: PDFWithJSON[] | null, error: any };
+
+      if (pdfError) {
+        console.error('Erro ao buscar PDFs:', pdfError);
+      }
+
+      console.log('PDFs encontrados na sessão:', sessionPDFs?.length || 0);
+
+      // Usar o PDF selecionado ou o primeiro disponível
+      let pdfId = selectedPDFId;
+      if (!pdfId && sessionPDFs && sessionPDFs.length > 0) {
+        // Verificar se algum PDF tem conteúdo processado
+        const processedPDF = sessionPDFs.find(pdf =>
+          pdf.json_content || pdf.extracted_content || pdf.processing_status === 'completed'
+        );
+
+        if (processedPDF) {
+          pdfId = processedPDF.id;
+          console.log('Usando PDF para pergunta específica:', processedPDF.original_name);
         }
-      } else if (availablePDFs.length > 0) {
-        // Use all available PDFs if none specifically selected
-        pdfContext = availablePDFs
-          .filter(pdf => pdf.json_content || pdf.extracted_content)
-          .map(pdf => pdf.extracted_content || JSON.stringify(pdf.json_content))
-          .join('\n\n---\n\n');
       }
 
-      // Call AI API
-      const { data: aiResponse, error } = await supabase.functions.invoke('ai-processor', {
+      // 🔥 Incluir conteúdo extraído dos PDFs na mensagem
+      let enhancedMessage = currentInput;
+      
+      if (sessionPDFs && sessionPDFs.length > 0) {
+        const pdfContents = sessionPDFs
+          .filter(pdf => pdf.extracted_content)
+          .map(pdf => `📄 **${pdf.original_name}**:\n${pdf.extracted_content}`)
+          .join('\n\n');
+          
+        if (pdfContents) {
+          enhancedMessage = `CONTEXTO DOS DOCUMENTOS:\n${pdfContents}\n\n---\n\nPERGUNTA DO USUÁRIO: ${currentInput}`;
+          console.log(`✅ Conteúdo de ${sessionPDFs.length} PDFs incluído na mensagem`);
+        }
+      }
+
+      // Call unified AI processor with enhanced message
+      const { data, error } = await supabase.functions.invoke('ai-processor', {
         body: {
           action: 'chat',
-          message: input,
-          pdfContext: pdfContext,
-          sessionId: currentSessionId
+          message: enhancedMessage,
+          sessionId: currentSessionId,
+          pdfId: pdfId // Passar o PDF ID se disponível
         }
       });
 
-      if (error) throw error;
+      console.log('AI response received:', data, 'error:', error);
 
-      if (!aiResponse?.success) {
-        throw new Error(aiResponse?.error || 'Erro na resposta da IA');
+      if (error) {
+        console.error('Supabase function error:', error);
+        throw new Error(error.message || 'Erro na comunicação com IA');
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Erro na resposta da IA');
       }
 
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: aiResponse.response,
+        content: data.response || 'Desculpe, não consegui processar sua mensagem.',
         isUser: false,
-        timestamp: new Date(),
-        type: 'normal'
+        timestamp: new Date()
       };
 
       setMessages(prev => [...prev, aiMessage]);
 
-      // Save AI response to database
-      if (user) {
-        await supabase
-          .from('chat_messages')
-          .insert({
-            session_id: currentSessionId,
-            user_id: user.id,
-            content: aiResponse.response,
-            is_user: false,
-            message_type: 'normal'
-          });
-      }
-
-      setQuestionCount(prev => prev + 1);
+      // Save AI message to database
+      await saveMessageToDatabase(aiMessage, currentSessionId, 'normal');
 
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error in chat:', error);
+
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: 'Desculpe, ocorreu um erro. Verifique se a GOOGLE_API_KEY está configurada.',
+        isUser: false,
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, aiMessage]);
+
       toast({
-        title: "Erro",
-        description: error instanceof Error ? error.message : "Erro ao enviar mensagem",
+        title: "Erro no chat",
+        description: errorMessage,
         variant: "destructive"
       });
     } finally {
@@ -594,406 +627,682 @@ const Chat = () => {
     }
   };
 
-  const handleSendSpecificMessage = async (message: string, type: string) => {
-    if (!currentSessionId) {
-      await createNewSession();
-    }
+  const saveMessageToDatabase = async (message: Message, sessionId: string, messageType?: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    setInput(message);
-    await handleSendMessage();
+      await supabase
+        .from('chat_messages')
+        .insert({
+          session_id: sessionId,
+          user_id: user.id,
+          content: message.content,
+          is_user: message.isUser,
+          message_type: message.type || 'normal'
+        });
+    } catch (error) {
+      console.error('Error saving message:', error);
+    }
   };
 
-  return (
-    <div className="h-[calc(100vh-73px)] flex flex-col bg-gradient-to-br from-background via-background/95 to-background overflow-hidden"
-      onDragEnter={handleDrag}
-      onDragLeave={handleDrag}
-      onDragOver={handleDrag}
-      onDrop={handleDrop}
-    >
-      {/* Hidden file input */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".pdf"
-        onChange={handleFileInputChange}
-        className="hidden"
-      />
+  const handleQuickPrompt = async (prompt: string, type: 'flashcard' | 'resume' | 'quiz' | 'prova') => {
+    console.log('Quick prompt triggered:', type, prompt);
 
-      {/* Drag overlay */}
-      {dragActive && (
-        <div className="fixed inset-0 bg-primary/20 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-card p-8 rounded-lg border-2 border-dashed border-primary">
-            <Upload className="h-12 w-12 text-primary mx-auto mb-4" />
-            <p className="text-lg font-medium text-center">Solte o PDF aqui</p>
-          </div>
-        </div>
-      )}
+    if (!currentSessionId) {
+      await createNewSession();
+      if (!currentSessionId) {
+        toast({
+          title: "Erro",
+          description: "Não foi possível criar uma nova sessão.",
+          variant: "destructive"
+        });
+        return;
+      }
+    }
 
-      {/* Header */}
-      <div className="flex-shrink-0 bg-card/80 backdrop-blur-lg border-b px-3 md:px-6 py-3 md:py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2 md:space-x-4">
-            <div className="lg:hidden">
-              <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-                <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon">
-                    <Menu className="h-5 w-5" />
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="left" className="w-72">
-                  <div className="space-y-4">
-                    <div>
-                      <h2 className="text-lg font-semibold mb-2">Chat AI</h2>
-                      <div className="flex items-center space-x-2 mb-4">
-                        <Badge variant="secondary" className="text-xs">
-                          {isPremium ? 'Premium' : userRole === 'admin' ? 'Admin' : 'Gratuito'}
-                        </Badge>
-                        <Badge variant="outline" className="text-xs">PDFs: {pdfCount}/3</Badge>
-                      </div>
-                    </div>
-                    
-                    <Button
-                      onClick={() => {
-                        fileInputRef.current?.click();
-                        setSidebarOpen(false);
-                      }}
-                      disabled={isUploading || isStudyingPDF}
-                      className="w-full"
-                    >
-                      {isUploading || isStudyingPDF ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <Upload className="h-4 w-4 mr-2" />
-                      )}
-                      Enviar PDF
-                    </Button>
+    // Check limits for non-admins
+    if (!isAdmin && questionCount >= 5) {
+      toast({
+        title: "Limite atingido",
+        description: "Você atingiu o limite de 5 perguntas do plano gratuito.",
+        variant: "destructive"
+      });
+      return;
+    }
 
-                    <SessionManager 
-                      onNewSession={createNewSession}
-                      onSaveSession={saveCurrentSession}
-                    />
-                  </div>
-                </SheetContent>
-              </Sheet>
-            </div>
-            
-            <h1 className="text-lg md:text-2xl font-bold text-primary">Chat AI</h1>
-            <div className="hidden md:flex items-center space-x-2">
-              <Badge variant="secondary" className="text-xs">
-                {isPremium ? 'Premium' : userRole === 'admin' ? 'Admin' : 'Gratuito'}
-              </Badge>
-              <Badge variant="outline" className="text-xs">PDFs: {pdfCount}/3</Badge>
-            </div>
-          </div>
-          
-          <div className="hidden lg:flex items-center gap-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
+    if (pdfCount === 0) {
+      toast({
+        title: "Nenhum PDF encontrado",
+        description: "Você precisa fazer upload de PDFs primeiro nesta sessão.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Track click event
+    trackClick(`quick_prompt_${type}`, '/chat');
+
+    setIsGenerating(type); // Set which content is being generated
+
+    try {
+      console.log('Calling AI processor for content generation');
+
+      // Show loading toast
+      toast({
+        title: `Gerando ${type === 'flashcard' ? 'Flashcards' :
+          type === 'resume' ? 'Resumo' :
+            type === 'quiz' ? 'Quiz' : 'Prova'}...`,
+        description: "Aguarde enquanto processamos seu conteúdo.",
+      });
+
+      const { data, error } = await supabase.functions.invoke('ai-processor', {
+        body: {
+          action: 'generate_content',
+          type: type,
+          prompt: prompt,
+          sessionId: currentSessionId
+        }
+      });
+
+      console.log('Content generation response:', data, 'error:', error);
+
+      if (error) {
+        console.error('Supabase function error:', error);
+        throw new Error(error.message || 'Erro na geração de conteúdo');
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Erro na geração de conteúdo');
+      }
+
+      setGeneratedContent(data);
+      setCurrentView(type);
+      setQuestionCount(prev => prev + 1);
+
+      // Save generated content to database
+      await saveGeneratedContentToDB(data, type);
+
+      // Save to conversation history
+      const newMessage: SavedMessage = {
+        id: Date.now().toString(),
+        title: `${type === 'flashcard' ? 'Flashcards' :
+          type === 'resume' ? 'Resumo' :
+            type === 'quiz' ? 'Quiz' : 'Prova'} - ${new Date().toLocaleDateString()}`,
+        content: JSON.stringify(data.content),
+        type,
+        category: 'IA Gerada',
+        createdAt: new Date()
+      };
+
+      setSavedMessages(prev => [newMessage, ...prev]);
+
+      toast({
+        title: "Conteúdo gerado!",
+        description: `${type === 'flashcard' ? 'Flashcards criados' :
+          type === 'resume' ? 'Resumo criado' :
+            type === 'quiz' ? 'Quiz criado' : 'Prova criada'} com sucesso.`,
+      });
+
+    } catch (error) {
+      console.error('Error generating content:', error);
+
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+
+      toast({
+        title: "Erro na geração",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    } finally {
+      setIsGenerating(null); // Clear generating state
+    }
+  };
+
+  const saveGeneratedContentToDB = async (data: any, type: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !currentSessionId) return;
+
+      // Note: generated_content table requires pdf_id, so we'll skip saving for now
+      // This would need to be updated to link to a specific PDF or handle it differently
+      console.log('Generated content saved to local state only');
+    } catch (error) {
+      console.error('Error saving generated content:', error);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
+  const handleSaveMessage = (content: string) => {
+    setDialogOpen(true);
+  };
+
+  const handleEditSavedMessage = (message: SavedMessage) => {
+    setEditingMessage(message);
+    setDialogOpen(true);
+  };
+
+  const handleDeleteSavedMessage = (id: string) => {
+    setSavedMessages(prev => prev.filter(m => m.id !== id));
+    toast({
+      title: "Conversa removida",
+      description: "A conversa salva foi removida com sucesso.",
+    });
+  };
+
+  const handleSaveChatMessage = (messageData: Omit<SavedMessage, 'id' | 'createdAt'>) => {
+    if (editingMessage) {
+      setSavedMessages(prev => prev.map(m =>
+        m.id === editingMessage.id
+          ? { ...m, ...messageData }
+          : m
+      ));
+      toast({
+        title: "Conversa atualizada",
+        description: "A conversa foi atualizada com sucesso.",
+      });
+    } else {
+      const newMessage: SavedMessage = {
+        id: Date.now().toString(),
+        ...messageData,
+        createdAt: new Date()
+      };
+      setSavedMessages(prev => [newMessage, ...prev]);
+      toast({
+        title: "Conversa salva",
+        description: "A conversa foi salva com sucesso.",
+      });
+    }
+    setEditingMessage(undefined);
+  };
+
+  const loadSavedMessage = (message: SavedMessage) => {
+    const newMessage: Message = {
+      id: Date.now().toString(),
+      content: message.content,
+      isUser: false,
+      timestamp: new Date(),
+      type: message.type
+    };
+    setMessages([newMessage]);
+    setShowSaved(false);
+  };
+
+  const handleSessionSelect = (sessionId: string) => {
+    setCurrentSessionId(sessionId);
+    setMessages([]); // Clear current messages
+    setPdfCount(0); // Reset PDF count
+    setUploadedFiles([]); // Clear uploaded files
+    loadSessionData(sessionId);
+  };
+
+  const handleNewSession = () => {
+    setCurrentSessionId(null);
+    setMessages([]);
+    setPdfCount(0);
+    setUploadedFiles([]);
+  };
+
+  // Render specific content views
+  const renderContentView = () => {
+    if (!generatedContent) return null;
+
+    switch (currentView) {
+      case 'flashcard':
+        return (
+          <div className="p-6">
+            <Button
+              variant="outline"
               onClick={() => setCurrentView('chat')}
-              className={currentView === 'chat' ? 'bg-primary text-primary-foreground' : ''}
+              className="mb-6"
             >
-              <MessageSquare className="h-4 w-4 mr-2" />
-              Chat
+              ← Voltar ao Chat
             </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setShowSaved(!showSaved)}
-            >
-              <History className="h-4 w-4 mr-2" />
-              Histórico
-            </Button>
-            <SessionManager 
-              onNewSession={createNewSession}
-              onSaveSession={saveCurrentSession}
+            <FlashcardCarousel
+              cards={generatedContent.content.cards}
+              title="Flashcards Gerados"
             />
           </div>
+        );
+
+      case 'resume':
+        return (
+          <div className="p-6">
+            <Button
+              variant="outline"
+              onClick={() => setCurrentView('chat')}
+              className="mb-6"
+            >
+              ← Voltar ao Chat
+            </Button>
+            <ResumeViewer
+              title={generatedContent.content.title}
+              content={generatedContent.content.content}
+            />
+          </div>
+        );
+
+      case 'quiz':
+        return (
+          <div className="p-6">
+            <Button
+              variant="outline"
+              onClick={() => setCurrentView('chat')}
+              className="mb-6"
+            >
+              ← Voltar ao Chat
+            </Button>
+            <QuizInterface
+              title={generatedContent.content.title}
+              questions={generatedContent.content.questions}
+            />
+          </div>
+        );
+
+      case 'prova':
+        return (
+          <div className="p-6">
+            <Button
+              variant="outline"
+              onClick={() => setCurrentView('chat')}
+              className="mb-6"
+            >
+              ← Voltar ao Chat
+            </Button>
+            <ExamInterface
+              title={generatedContent.content.title}
+              multipleChoice={generatedContent.content.multipleChoice}
+              essays={generatedContent.content.essays}
+            />
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  if (currentView !== 'chat') {
+    return (
+      <div className="h-[calc(100vh-140px)] relative">
+        <div
+          className="fixed inset-0 opacity-5 pointer-events-none z-0"
+          style={{
+            backgroundImage: `url(https://images.unsplash.com/photo-1513836279014-a89f7a76ae86?w=1920&h=1080&fit=crop)`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center'
+          }}
+        />
+        <div className="relative z-10 h-full overflow-y-auto">
+          {renderContentView()}
         </div>
       </div>
+    );
+  }
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
-        
-        {/* Desktop Sidebar - Hidden on mobile */}
-        <div className="hidden lg:block w-80 bg-card/50 backdrop-blur-lg border-r p-4 xl:p-6 overflow-y-auto flex-shrink-0">
-          <div className="space-y-4 xl:space-y-6">
-            {/* Upload Section */}
-            <div className="space-y-3 xl:space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-xs xl:text-sm uppercase tracking-wide text-muted-foreground">PDFs Enviados</h3>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading || isStudyingPDF}
-                  className="hover:bg-primary/10"
+  return (
+    <div className="h-[calc(100vh-80px)] flex gap-6 relative">
+      <div
+        className="fixed inset-0 opacity-5 pointer-events-none z-0"
+        style={{
+          backgroundImage: `url(https://images.unsplash.com/photo-1513836279014-a89f7a76ae86?w=1920&h=1080&fit=crop)`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center'
+        }}
+      />
+
+      {/* Left Sidebar - Sessions and Quick Actions */}
+      <div className="w-80 flex-shrink-0 relative z-10 space-y-4">
+        <div>
+          <h1 className="text-2xl font-display font-bold mb-2 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+            Chat com IA
+          </h1>
+          <p className="text-muted-foreground text-sm mb-4">
+            Crie flashcards, resumos, quiz e provas
+          </p>
+          <div className="flex gap-2 text-xs text-muted-foreground mb-4">
+            <span>PDFs: {isAdmin ? `${pdfCount}/∞` : `${pdfCount}/3`}</span>
+            <span>Perguntas: {isAdmin ? `${questionCount}/∞` : `${questionCount}/5`}</span>
+            {isAdmin && <Badge variant="outline" className="text-xs">ADMIN</Badge>}
+          </div>
+
+          <Button
+            onClick={createNewSession}
+            className="w-full mb-4"
+            size="sm"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Nova Conversa
+          </Button>
+        </div>
+
+        {/* Session Manager - Compact */}
+        <div className="mb-4">
+          <SessionManager
+            currentSessionId={currentSessionId}
+            onSessionSelect={(sessionId) => {
+              saveCurrentSession();
+              setCurrentSessionId(sessionId);
+              loadSessionData(sessionId);
+            }}
+            onNewSession={createNewSession}
+          />
+        </div>
+
+        {/* Quick Actions - Compact Grid */}
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-muted-foreground">Ações Rápidas</h3>
+          <div className="grid grid-cols-1 gap-2">
+            {quickPrompts.map((prompt, index) => {
+              const Icon = prompt.icon;
+              const isGeneratingThis = isGenerating === prompt.type;
+              return (
+                <Card
+                  key={index}
+                  className={`cursor-pointer hover:shadow-md transition-all duration-200 bg-card/80 backdrop-blur-sm border-primary/20 hover:border-primary/40 ${isGeneratingThis ? 'opacity-50 pointer-events-none' : ''
+                    }`}
+                  onClick={() => !isGenerating && handleQuickPrompt(prompt.prompt, prompt.type)}
                 >
-                  {isUploading || isStudyingPDF ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Upload className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-
-              {/* PDF List */}
-              {availablePDFs.length > 0 ? (
-                <div className="space-y-2">
-                  {availablePDFs.map((pdf) => (
-                    <div 
-                      key={pdf.id}
-                      className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                        selectedPDFId === pdf.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
-                      }`}
-                      onClick={() => setSelectedPDFId(selectedPDFId === pdf.id ? null : pdf.id)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2 flex-1 min-w-0">
-                          <FileText className="h-4 w-4 text-primary flex-shrink-0" />
-                          <span className="text-sm font-medium truncate">{pdf.original_name}</span>
-                        </div>
-                        <Badge variant="outline" className="text-xs ml-2">
-                          {pdf.json_content || pdf.extracted_content ? '✓' : '⏳'}
-                        </Badge>
+                  <CardContent className="p-3">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-8 h-8 bg-primary/15 rounded-lg flex items-center justify-center flex-shrink-0">
+                        {isGeneratingThis ? (
+                          <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <Icon className="h-4 w-4 text-primary" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium text-xs">{prompt.title}</h4>
+                        <p className="text-xs text-muted-foreground truncate">{prompt.description}</p>
                       </div>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Upload className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">Nenhum PDF enviado</p>
-                </div>
-              )}
-            </div>
-
-            {/* Quick Actions */}
-            <div className="space-y-3">
-              <h3 className="font-semibold text-xs xl:text-sm uppercase tracking-wide text-muted-foreground">Ações Rápidas</h3>
-              <div className="space-y-2">
-                {quickPrompts.map((prompt, index) => (
-                  <Button
-                    key={index}
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-start text-left h-auto p-3"
-                    onClick={() => {
-                      setIsGenerating(prompt.type);
-                      handleSendSpecificMessage(prompt.prompt + " [adicione o tópico que deseja estudar]", prompt.type);
-                    }}
-                    disabled={isGenerating === prompt.type}
-                  >
-                    <prompt.icon className="h-4 w-4 mr-2 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-xs">{prompt.title}</div>
-                      <div className="text-xs text-muted-foreground">{prompt.description}</div>
-                    </div>
-                  </Button>
-                ))}
-              </div>
-            </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </div>
 
-        {/* Chat Messages Area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {currentView === 'chat' && (
-            <>
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-3 md:p-6 space-y-3 md:space-y-4">
-                {messages.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-center space-y-4 max-w-md px-4">
-                      <div className="w-12 h-12 md:w-16 md:h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
-                        <Bot className="w-6 h-6 md:w-8 md:h-8 text-primary" />
-                      </div>
-                      <h3 className="text-base md:text-lg font-semibold">Bem-vindo ao Chat AI!</h3>
-                      <p className="text-sm md:text-base text-muted-foreground">
-                        Envie seus PDFs e comece a fazer perguntas sobre o conteúdo.
-                        Posso criar flashcards, resumos, quizzes e muito mais!
-                      </p>
-                      
-                      {/* Mobile Upload Button */}
-                      <div className="lg:hidden">
-                        <Button
-                          onClick={() => fileInputRef.current?.click()}
-                          disabled={isUploading || isStudyingPDF}
-                          className="w-full"
-                        >
-                          {isUploading || isStudyingPDF ? (
-                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          ) : (
-                            <Upload className="h-4 w-4 mr-2" />
-                          )}
-                          Enviar PDF
-                        </Button>
-                      </div>
-                      
-                      <div className="flex flex-wrap gap-2 justify-center">
-                        {quickPrompts.map((prompt, index) => (
-                          <Button
-                            key={index}
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setIsGenerating(prompt.type);
-                              handleSendSpecificMessage(prompt.prompt + " [adicione o tópico que deseja estudar]", prompt.type);
-                            }}
-                            disabled={isGenerating === prompt.type}
-                            className="hover:bg-primary/10 text-xs md:text-sm"
-                          >
-                            <prompt.icon className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
-                            <span className="hidden sm:inline">{prompt.title}</span>
-                            <span className="sm:hidden">{prompt.title.split(' ')[0]}</span>
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {messages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
-                      >
-                        <div
-                          className={`max-w-[90%] md:max-w-[80%] p-3 md:p-4 rounded-lg ${message.isUser
-                              ? 'bg-primary text-primary-foreground'
-                              : 'bg-muted'
-                            }`}
-                        >
-                          <div className="flex items-start space-x-2 md:space-x-3">
-                            <div className={`w-6 h-6 md:w-8 md:h-8 rounded-full flex items-center justify-center flex-shrink-0 ${message.isUser ? 'bg-primary-foreground/20' : 'bg-primary/10'
-                              }`}>
-                              {message.isUser ? (
-                                <User className="w-3 h-3 md:w-4 md:h-4" />
-                              ) : (
-                                <Bot className="w-3 h-3 md:w-4 md:h-4" />
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="whitespace-pre-wrap break-words text-xs md:text-sm">
-                                {message.content}
-                              </p>
-                              <p className="text-xs opacity-70 mt-2">
-                                {message.timestamp.toLocaleTimeString('pt-BR')}
-                              </p>
-                            </div>
+        {/* PDFs Disponíveis */}
+        {availablePDFs.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium text-muted-foreground">PDFs Disponíveis</h3>
+            <div className="space-y-2">
+              {availablePDFs.map((pdf) => {
+                const isSelected = selectedPDFId === pdf.id;
+                const hasContent = pdf.json_content || pdf.extracted_content;
+                const isProcessed = pdf.processing_status === 'completed' || pdf.processing_status === 'json_completed';
+
+                return (
+                  <Card
+                    key={pdf.id}
+                    className={`cursor-pointer hover:shadow-md transition-all duration-200 bg-card/80 backdrop-blur-sm border-primary/20 hover:border-primary/40 ${isSelected ? 'border-primary bg-primary/10' : ''
+                      } ${!hasContent ? 'opacity-50' : ''}`}
+                    onClick={() => hasContent && setSelectedPDFId(pdf.id)}
+                  >
+                    <CardContent className="p-3">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-8 h-8 bg-blue-500/15 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <FileText className="h-4 w-4 text-blue-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-medium text-xs truncate">{pdf.original_name}</h4>
+                          <div className="flex items-center space-x-1 mt-1">
+                            {isProcessed ? (
+                              <Badge variant="outline" className="text-xs bg-green-500/10 text-green-600">
+                                Pronto
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-600">
+                                Processando
+                              </Badge>
+                            )}
+                            {pdf.json_content && (
+                              <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-600">
+                                JSON
+                              </Badge>
+                            )}
+                            {isSelected && (
+                              <Badge variant="outline" className="text-xs bg-primary/10 text-primary">
+                                Ativo
+                              </Badge>
+                            )}
                           </div>
                         </div>
                       </div>
-                    ))}
-                    <div ref={messagesEndRef} />
-                  </>
-                )}
-              </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
-              {/* Input Area */}
-              <div className="border-t bg-card/80 backdrop-blur-lg p-3 md:p-6">
-                {/* PDFs em uso */}
-                {availablePDFs.length > 0 && (
-                  <div className="mb-3 md:mb-4 p-2 md:p-3 bg-muted/50 rounded-lg">
-                    <div className="flex items-center gap-2 mb-2">
-                      <FileText className="h-3 h-3 md:h-4 md:w-4 text-primary" />
-                      <span className="text-xs md:text-sm font-medium">PDFs disponíveis:</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1 md:gap-2">
-                      {availablePDFs.map((pdf) => (
-                        <Badge 
-                          key={pdf.id} 
-                          variant={selectedPDFId === pdf.id ? "default" : "outline"}
-                          className="cursor-pointer text-xs truncate max-w-[120px] md:max-w-none"
-                          onClick={() => setSelectedPDFId(selectedPDFId === pdf.id ? null : pdf.id)}
-                          title={pdf.original_name}
-                        >
-                          {pdf.original_name.length > 15 ? `${pdf.original_name.substring(0, 15)}...` : pdf.original_name}
-                          {pdf.json_content || pdf.extracted_content ? ' ✓' : ' ⏳'}
+        {/* Saved Messages Toggle */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowSaved(!showSaved)}
+          className="w-full"
+        >
+          <History className="h-4 w-4 mr-2" />
+          {showSaved ? 'Ocultar' : 'Salvos'}
+        </Button>
+
+        {showSaved && (
+          <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Conversas Salvas</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {savedMessages.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-2">
+                  Nenhuma conversa salva
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {savedMessages.slice(0, 3).map((message) => (
+                    <div key={message.id} className="p-2 border rounded cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => loadSavedMessage(message)}>
+                      <h5 className="font-medium text-xs truncate">{message.title}</h5>
+                      <div className="flex items-center gap-1 mt-1">
+                        <Badge variant="secondary" className="text-xs px-1 py-0">
+                          {message.type === 'flashcard' ? 'Flash' :
+                            message.type === 'resume' ? 'Resumo' :
+                              message.type === 'quiz' ? 'Quiz' : 'Prova'}
                         </Badge>
-                      ))}
+                        <span className="text-xs text-muted-foreground">
+                          {message.createdAt.toLocaleDateString()}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                )}
-
-                <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="space-y-3 md:space-y-4">
-                  <div className="flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-4">
-                    <div className="flex-1">
-                      <Textarea
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        placeholder="Digite sua pergunta sobre os PDFs..."
-                        className="min-h-[60px] md:min-h-[80px] resize-none focus:ring-2 focus:ring-primary text-sm md:text-base"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSendMessage();
-                          }
-                        }}
-                        disabled={isLoading}
-                      />
-                    </div>
-                    <div className="flex md:flex-col justify-center md:justify-end space-x-2 md:space-x-0 md:space-y-2">
-                      <Button
-                        type="submit"
-                        disabled={isLoading || !input.trim()}
-                        className="flex-1 md:flex-none h-8 md:h-10 px-3 md:px-4 text-sm"
-                      >
-                        {isLoading ? (
-                          <Loader2 className="h-3 h-3 md:h-4 md:w-4 animate-spin" />
-                        ) : (
-                          <Send className="h-3 h-3 md:h-4 md:w-4" />
-                        )}
-                        <span className="ml-1 md:ml-0 md:sr-only">Enviar</span>
-                      </Button>
-                    </div>
-                  </div>
-                </form>
-              </div>
-            </>
-          )}
-
-          {/* Other Views */}
-          {currentView === 'flashcard' && generatedContent && (
-            <FlashcardCarousel 
-              cards={generatedContent} 
-            />
-          )}
-
-          {currentView === 'resume' && generatedContent && (
-            <ResumeViewer 
-              content={generatedContent} 
-            />
-          )}
-
-          {currentView === 'quiz' && generatedContent && (
-            <QuizInterface 
-              questions={generatedContent} 
-            />
-          )}
-
-          {currentView === 'prova' && generatedContent && (
-            <ExamInterface 
-              questions={generatedContent} 
-            />
-          )}
-        </div>
+                  ))}
+                  {savedMessages.length > 3 && (
+                    <p className="text-xs text-muted-foreground text-center">
+                      +{savedMessages.length - 3} mais...
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
-      {/* Chat Message Dialog */}
+      {/* Main Chat Area - Centered and Larger */}
+      <div className="flex-1 relative z-10">
+        <Card className="h-full bg-card/80 backdrop-blur-sm border-primary/20">
+          <CardContent className="p-0 h-full flex flex-col">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {messages.length === 0 ? (
+                <div className="text-center text-muted-foreground py-20">
+                  <Bot className="h-16 w-16 mx-auto mb-6 opacity-50" />
+                  <h3 className="text-xl font-medium mb-2">Bem-vindo ao Chat AI!</h3>
+                  <p className="text-lg">Use as ações rápidas na barra lateral ou digite sua mensagem</p>
+                </div>
+              ) : (
+                messages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`flex items-start space-x-4 ${message.isUser ? 'flex-row-reverse space-x-reverse' : ''
+                      }`}
+                  >
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${message.isUser
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground'
+                      }`}>
+                      {message.isUser ? <User className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
+                    </div>
+                    <div className={`flex-1 max-w-[75%] ${message.isUser ? 'text-right' : ''}`}>
+                      <div className={`rounded-xl p-4 ${message.isUser
+                        ? 'bg-primary text-primary-foreground ml-auto'
+                        : 'bg-muted'
+                        }`}>
+                        <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                        {!message.isUser && (
+                          <div className="flex justify-end mt-3">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleSaveMessage(message.content)}
+                              className="text-xs h-7 px-3 hover:bg-background/20"
+                            >
+                              <Save className="h-3 w-3 mr-1" />
+                              Salvar
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2 px-1">
+                        {message.timestamp.toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+              {isLoading && (
+                <div className="flex items-start space-x-4">
+                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                    <Bot className="h-5 w-5" />
+                  </div>
+                  <div className="bg-muted rounded-xl p-4">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-current rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input Area */}
+            <div className="border-t p-6">
+              {/* Show selected PDF info */}
+              {selectedPDFId && availablePDFs.length > 0 && (
+                <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <div className="flex items-center space-x-2">
+                    <FileText className="h-4 w-4 text-blue-600" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                        Usando PDF: {availablePDFs.find(pdf => pdf.id === selectedPDFId)?.original_name}
+                      </p>
+                      <p className="text-xs text-blue-700 dark:text-blue-300">
+                        Suas perguntas serão respondidas com base neste documento
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Show uploaded files */}
+              {uploadedFiles.length > 0 && (
+                <div className="mb-4 space-y-2">
+                  <h4 className="text-sm font-medium text-muted-foreground">Arquivos selecionados:</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {uploadedFiles.map((file, index) => (
+                      <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded-lg text-sm">
+                        <File className="h-4 w-4" />
+                        <span>{file.name}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {Math.round(file.size / 1024)} KB
+                        </Badge>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFile(index)}
+                          className="h-6 w-6 p-0"
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex space-x-3">
+                <Button
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading || (!isAdmin && pdfCount >= 3)}
+                  size="icon"
+                  className="h-12 w-12 flex-shrink-0"
+                  title={(!isAdmin && pdfCount >= 3) ? 'Limite de PDFs atingido' : 'Upload de PDF (máx. 10MB)'}
+                >
+                  <Upload className="h-5 w-5" />
+                </Button>
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Digite sua mensagem (ex: 'crie flashcards', 'faça um resumo', 'gere um quiz')..."
+                  className="flex-1 min-h-[48px] max-h-[120px] resize-none text-base"
+                  disabled={isLoading}
+                />
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={!input.trim() || isLoading}
+                  size="icon"
+                  className="h-12 w-12 flex-shrink-0"
+                >
+                  <Send className="h-5 w-5" />
+                </Button>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                multiple
+                onChange={handleFileInputChange}
+                className="hidden"
+              />
+
+              <div className="flex justify-between items-center mt-3 text-xs text-muted-foreground">
+                <span>PDFs: {isAdmin ? `${pdfCount}/∞` : `${pdfCount}/3`} • Perguntas: {isAdmin ? `${questionCount}/∞` : `${questionCount}/5`} • Máx: 10MB</span>
+                {isUploading && <span>Enviando arquivo...</span>}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <ChatMessageDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        message={editingMessage}
-        onSave={(message) => {
-          if (editingMessage) {
-            setSavedMessages(prev => prev.map(m => m.id === message.id ? message : m));
-          } else {
-            setSavedMessages(prev => [...prev, { ...message, id: Date.now().toString(), createdAt: new Date() }]);
-          }
-          setDialogOpen(false);
-          setEditingMessage(undefined);
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) setEditingMessage(undefined);
         }}
+        message={editingMessage}
+        onSave={handleSaveChatMessage}
       />
     </div>
   );

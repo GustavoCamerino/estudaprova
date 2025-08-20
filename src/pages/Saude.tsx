@@ -226,18 +226,18 @@ const Saude: React.FC = () => {
     const [newMeal, setNewMeal] = useState<Omit<Meal, 'id'>>({ name: '', calories: 0, protein: 0, carbs: 0, fat: 0, time: '' });
 
     return (
-        <div className="min-h-screen p-4 md:p-6 space-y-4 md:space-y-6 overflow-x-hidden">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <h1 className="text-2xl md:text-3xl font-semibold">Saúde</h1>
-                <div className="flex flex-wrap items-center gap-2">
-                    <Badge style={{ backgroundColor: '#4A90E2' }} className="text-white text-xs">Hidratação</Badge>
-                    <Badge style={{ backgroundColor: '#7ED321' }} className="text-white text-xs">Sono</Badge>
-                    <Badge style={{ backgroundColor: '#F5A623' }} className="text-white text-xs">Bem-estar</Badge>
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <h1 className="text-3xl font-semibold">Saúde</h1>
+                <div className="flex items-center gap-2">
+                    <Badge style={{ backgroundColor: '#4A90E2' }} className="text-white">Hidratação</Badge>
+                    <Badge style={{ backgroundColor: '#7ED321' }} className="text-white">Sono</Badge>
+                    <Badge style={{ backgroundColor: '#F5A623' }} className="text-white">Bem-estar</Badge>
                 </div>
             </div>
 
             {/* Grid responsiva */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {/* Hidratação */}
                 <Card className="shadow-md">
                     <CardHeader>
@@ -316,8 +316,8 @@ const Saude: React.FC = () => {
                         <CardDescription>Registre suas refeições e acompanhe calorias e macros.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
-                            <div className="xl:col-span-2">
+                        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                            <div className="md:col-span-2">
                                 <Label>Refeição</Label>
                                 <Input value={newMeal.name} onChange={(e) => setNewMeal(s => ({ ...s, name: e.target.value }))} placeholder="Ex: Salada com frango" />
                             </div>
@@ -337,7 +337,7 @@ const Saude: React.FC = () => {
                                 <Label>Gordura (g)</Label>
                                 <Input type="number" value={newMeal.fat} onChange={(e) => setNewMeal(s => ({ ...s, fat: parseInt(e.target.value || '0') }))} />
                             </div>
-                            <div>
+                            <div className="md:col-span-1">
                                 <Label>Horário</Label>
                                 <Input type="time" value={newMeal.time} onChange={(e) => setNewMeal(s => ({ ...s, time: e.target.value }))} />
                             </div>
