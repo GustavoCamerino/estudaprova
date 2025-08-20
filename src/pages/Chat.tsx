@@ -102,6 +102,148 @@ const Chat = () => {
     }
   };
 
+  // --- Helpers: Processar conteúdo por página no front ---
+  const splitExtractedIntoPages = (content: string): string[] => {
+    if (!content) return [];
+    const parts = content.split(/\n=== PÁGINA\s+\d+\s===\n/).filter(p => p.trim().length > 0);
+    if (parts.length > 1) return parts;
+    // fallback: tentar dividir por quebras grandes
+    return content.split(/\n{2,}/).filter(p => p.trim().length > 0);
+  };
+
+  const extractSentences = (text: string): string[] => {
+    return text
+      .replace(/\s+/g, ' ')
+      .split(/(?<=[\.!?])\s+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 40);
+  };
+
+  const generateFlashcardsFromPages = (pages: string[], maxCards: number = 10) => {
+    const cards: any[] = [];
+    for (let i = 0; i < pages.length && cards.length < maxCards; i++) {
+      const sentences = extractSentences(pages[i]);
+      if (sentences.length === 0) continue;
+      const sentence = sentences[0];
+      const question = sentence.length > 120 ? 'Qual é a ideia principal desta parte do conteúdo?' : `O que significa: "${sentence.replace(/\"/g, '"')}"?`;
+      const answer = sentence;
+      cards.push({ id: (cards.length + 1).toString(), question, answer });
+    }
+    // completar se faltou
+    while (cards.length < maxCards && pages.length > 0) {
+      cards.push({ id: (cards.length + 1).toString(), question: 'Qual é o tema principal do documento?', answer: 'O tema principal está relacionado ao conteúdo estudado no PDF.' });
+    }
+    return { cards };
+  };
+
+  const pickOptions = (correct: string): string[] => {
+    const base = [
+      correct,
+      'Afirmação parcialmente relacionada',
+      'Conceito alternativo do tema',
+      'Opção irrelevante ao contexto'
+    ];
+    return base.slice(0, 4);
+  };
+
+  const generateQuizFromPages = (pages: string[], total: number = 10) => {
+    const questions: any[] = [];
+    let pageIndex = 0;
+    while (questions.length < total && pages.length > 0) {
+      const page = pages[pageIndex % pages.length];
+      const sentences = extractSentences(page);
+      if (sentences.length > 0) {
+        const stem = sentences[0].length > 120 ? 'Qual é a melhor interpretação deste trecho?' : `Sobre o trecho: "${sentences[0].replace(/\"/g, '"')}", qual alternativa está correta?`;
+        const correct = sentences[0];
+        const options = pickOptions(correct);
+        questions.push({
+          id: (questions.length + 1).toString(),
+          question: stem,
+          options,
+          correctAnswer: 0,
+          explanation: 'A alternativa correta reflete fielmente o conteúdo do trecho.'
+        });
+      }
+      pageIndex++;
+      if (pageIndex > pages.length * 3) break;
+    }
+    while (questions.length < total) {
+      questions.push({
+        id: (questions.length + 1).toString(),
+        question: 'Qual conceito melhor resume o conteúdo estudado?',
+        options: ['Conceito A', 'Conceito B', 'Conceito C', 'Conceito D'],
+        correctAnswer: 0,
+        explanation: 'Essa questão foi gerada automaticamente para completar o quiz.'
+      });
+    }
+    return { questions };
+  };
+
+  const generateExamFromPages = (pages: string[], total: number = 20) => {
+    const multipleChoice: any[] = [];
+    let pageIndex = 0;
+    while (multipleChoice.length < total && pages.length > 0) {
+      const page = pages[pageIndex % pages.length];
+      const sentences = extractSentences(page);
+      if (sentences.length > 0) {
+        const stem = sentences[0].length > 120 ? 'Selecione a alternativa que melhor representa o trecho a seguir.' : `Com base no trecho: "${sentences[0].replace(/\"/g, '"')}", escolha a alternativa correta.`;
+        const correct = sentences[0];
+        const options = pickOptions(correct);
+        multipleChoice.push({
+          id: (multipleChoice.length + 1).toString(),
+          question: stem,
+          options,
+          correctAnswer: 0,
+          points: 1
+        });
+      }
+      pageIndex++;
+      if (pageIndex > pages.length * 3) break;
+    }
+    while (multipleChoice.length < total) {
+      multipleChoice.push({
+        id: (multipleChoice.length + 1).toString(),
+        question: 'Qual alternativa mais condiz com o conteúdo estudado?',
+        options: ['Opção A', 'Opção B', 'Opção C', 'Opção D'],
+        correctAnswer: 0,
+        points: 1
+      });
+    }
+    return { multipleChoice };
+  };
+
+  const generateResumeFromPages = (pages: string[]) => {
+    const sections = pages.map((p, idx) => {
+      const sentences = extractSentences(p);
+      const summary = sentences.slice(0, 3).join(' ');
+      return `### Página ${idx + 1}\n${summary}`;
+    });
+    const content = `# Resumo do Documento\n\n${sections.join('\n\n')}`;
+    return { content };
+  };
+
+  const generateDietPlanLocal = () => {
+    const today = new Date();
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    const dateStr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const baseMeals = [
+      { time: '07:00', name: 'Pão integral com ovos mexidos e fruta', calories: 380 },
+      { time: '10:00', name: 'Iogurte natural com granola', calories: 220 },
+      { time: '13:00', name: 'Arroz, feijão, frango grelhado e salada', calories: 600 },
+      { time: '16:00', name: 'Castanhas e 1 maçã', calories: 250 },
+      { time: '19:00', name: 'Sopa de legumes com carne magra', calories: 450 }
+    ];
+    const days = Array.from({ length: 7 }).map((_, i) => {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      return {
+        date: dateStr(d),
+        meals: baseMeals
+      };
+    });
+    return { days };
+  };
+
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
     if (!file) return;
@@ -225,40 +367,39 @@ const Chat = () => {
     trackClick(`generate-${type}`, '/chat');
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Usuário não autenticado');
-
-      let prompt = '';
-      switch (type) {
-        case 'flashcard':
-          prompt = `Gerar 10 flashcards educacionais de alta qualidade com base nos PDFs do usuário. Formato JSON: {"cards": [{"id": "1", "question": "Pergunta?", "answer": "Resposta detalhada"}]}`;
-          break;
-        case 'resume':
-          prompt = `Gerar um resumo completo e didático em Markdown dos PDFs do usuário (títulos, subtítulos, listas, destaques).`;
-          break;
-        case 'quiz':
-          prompt = `Gerar um quiz com 10 questões de múltipla escolha com base nos PDFs do usuário. Formato JSON: {"questions": [{"id": "1", "question": "Pergunta?", "options": ["A", "B", "C", "D"], "correctAnswer": 0, "explanation": "Explicação"}]}`;
-          break;
-        case 'prova':
-          prompt = `Gerar uma prova com 20 questões de múltipla escolha com base nos PDFs do usuário. Formato JSON: {"multipleChoice": [{"id": "1", "question": "Pergunta?", "options": ["A", "B", "C", "D"], "correctAnswer": 0, "points": 1}]}`;
-          break;
-        case 'dieta':
-          prompt = `Gerar um plano alimentar de 7 dias (café, lanche manhã, almoço, lanche tarde, jantar) no formato JSON: {"days": [{"date": "AAAA-MM-DD", "meals": [{"name": "Refeição", "time": "07:00", "calories": 300, "description": "Descrição"}]}]}`;
-          break;
+      // Obter conteúdo por página do primeiro PDF disponível
+      const firstPdf = availablePDFs[0];
+      let pages: string[] = [];
+      if (firstPdf?.json_content?.pages?.length) {
+        pages = firstPdf.json_content.pages.map((p: any) => p.content || '').filter((t: string) => t.trim().length > 0);
+      } else if (firstPdf?.extracted_content) {
+        pages = splitExtractedIntoPages(firstPdf.extracted_content);
+      } else {
+        // Tentar converter para JSON via função que não usa IA
+        try {
+          const { data: conv } = await supabase.functions.invoke('pdf-to-json', {
+            body: { action: 'convert_to_json', pdfId: firstPdf.id }
+          });
+          if (conv?.success && conv.json_content?.pages?.length) {
+            pages = conv.json_content.pages.map((p: any) => p.content || '').filter((t: string) => t.trim().length > 0);
+          }
+        } catch (_) {}
       }
 
-      const { data: resp, error } = await supabase.functions.invoke('ai-processor', {
-        body: { 
-          action: 'generate_content',
-          type: type,
-          prompt
-        }
-      });
+      if (pages.length === 0) {
+        throw new Error('Não foi possível preparar o conteúdo do PDF no front.');
+      }
 
-      if (error) throw new Error(error.message);
-      if (!resp?.success) throw new Error(resp?.error || 'Falha ao gerar conteúdo');
+      let content: any = null;
+      if (type === 'flashcard') content = generateFlashcardsFromPages(pages, 10);
+      if (type === 'quiz') content = generateQuizFromPages(pages, 10);
+      if (type === 'prova') content = generateExamFromPages(pages, 20);
+      if (type === 'resume') content = generateResumeFromPages(pages);
+      if (type === 'dieta') content = generateDietPlanLocal();
 
-      setGeneratedContent(resp.content);
+      if (!content) throw new Error('Geração indisponível.');
+
+      setGeneratedContent(content);
       setCurrentView(type);
 
       const typeNames = {
