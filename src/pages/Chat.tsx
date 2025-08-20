@@ -124,14 +124,15 @@ const Chat = () => {
     const used = new Set<string>();
     for (let i = 0; i < pages.length && cards.length < maxCards; i++) {
       const sentences = extractSentences(pages[i]);
-      if (sentences.length === 0) continue;
-      const candidate = sentences[0];
-      const key = normalize(candidate);
-      if (used.has(key)) continue;
-      used.add(key);
-      const q = `Página ${i + 1}: O que significa este trecho?`;
-      const a = candidate.length > 280 ? candidate.slice(0, 277) + '...' : candidate;
-      cards.push({ id: (cards.length + 1).toString(), question: q, answer: a });
+      for (let s = 0; s < sentences.length && cards.length < maxCards; s++) {
+        const candidate = sentences[s];
+        const key = normalize(candidate);
+        if (used.has(key)) continue;
+        used.add(key);
+        const q = `Página ${i + 1}: O que o PDF afirma sobre este trecho?`;
+        const a = candidate.length > 280 ? candidate.slice(0, 277) + '...' : candidate;
+        cards.push({ id: (cards.length + 1).toString(), question: q, answer: a });
+      }
     }
     let fillerIndex = 0;
     while (cards.length < maxCards && pages.length > 0) {
@@ -236,12 +237,14 @@ const Chat = () => {
   };
 
   const generateResumeFromPages = (pages: string[]) => {
+    const bullets: string[] = [];
     const sections = pages.map((p, idx) => {
       const sentences = extractSentences(p);
-      const summary = sentences.slice(0, 3).join(' ');
+      if (sentences[0]) bullets.push(`- ${sentences[0]}`);
+      const summary = sentences.slice(0, 3).map(s => `- ${s}`).join('\n');
       return `### Página ${idx + 1}\n${summary}`;
     });
-    const content = `# Resumo do Documento\n\n${sections.join('\n\n')}`;
+    const content = `# Resumo do Documento\n\n## Visão Geral\n${bullets.join('\n')}\n\n## Seções por Página\n\n${sections.join('\n\n')}`;
     return { content };
   };
 
@@ -426,6 +429,17 @@ const Chat = () => {
     } finally {
       setIsGenerating(null);
     }
+  };
+
+  // Renderizador simples: *texto* -> negrito
+  const renderFormatted = (text: string) => {
+    const parts = text.split(/(\*[^*]+\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+        return <strong key={i}>{part.slice(1, -1)}</strong>;
+      }
+      return <React.Fragment key={i}>{part}</React.Fragment>;
+    });
   };
 
   const handleSendMessage = async () => {
@@ -743,7 +757,7 @@ const Chat = () => {
                               : 'bg-muted text-muted-foreground'
                           }`}
                         >
-                          <p className="whitespace-pre-wrap">{message.content}</p>
+                          <p className="whitespace-pre-wrap">{renderFormatted(message.content)}</p>
                           <p className="text-xs opacity-70 mt-1">
                             {message.timestamp.toLocaleTimeString()}
                           </p>
