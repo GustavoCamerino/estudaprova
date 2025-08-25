@@ -130,7 +130,7 @@ const Chat = () => {
       setCurrentView('chat');
       setMessages([{
         id: Date.now().toString(),
-        content: `PDF "${file.name}" foi processado com sucesso! Agora você pode fazer perguntas sobre o conteúdo.`,
+        content: `PDF "${file.name}" foi processado com sucesso! Agora você pode fazer perguntas sobre o conteúdo ou usar as opções acima para gerar flashcards, resumos, quizzes e provas.`,
         isUser: false,
         timestamp: new Date()
       }]);
@@ -603,101 +603,171 @@ Responda de forma clara e baseada exclusivamente no conteúdo do PDF fornecido.`
         </div>
       </div>
 
-      {/* Action Buttons */}
-      <div className="p-4 border-b border-border bg-card">
-        <div className="grid grid-cols-2 gap-3 max-w-2xl mx-auto">
-          <Button
-            variant="outline"
-            className="flex items-center gap-2 h-10"
-            onClick={() => generateContent('flashcard')}
-            disabled={!!isGenerating}
-          >
-            <Brain className="w-4 h-4" />
-            {isGenerating === 'flashcard' ? 'Criando...' : 'Criar Flashcards'}
-          </Button>
-          
-          <Button
-            variant="outline"
-            className="flex items-center gap-2 h-10"
-            onClick={() => generateContent('resume')}
-            disabled={!!isGenerating}
-          >
-            <FileText className="w-4 h-4" />
-            {isGenerating === 'resume' ? 'Fazendo...' : 'Fazer Resumo'}
-          </Button>
-          
-          <Button
-            variant="outline"
-            className="flex items-center gap-2 h-10"
-            onClick={() => generateContent('quiz')}
-            disabled={!!isGenerating}
-          >
-            <HelpCircle className="w-4 h-4" />
-            {isGenerating === 'quiz' ? 'Criando...' : 'Criar Quiz'}
-          </Button>
-          
-          <Button
-            variant="outline"
-            className="flex items-center gap-2 h-10"
-            onClick={() => generateContent('prova')}
-            disabled={!!isGenerating}
-          >
-            <Zap className="w-4 h-4" />
-            {isGenerating === 'prova' ? 'Gerando...' : 'Gerar Prova'}
-          </Button>
+      {/* Action Buttons - Only show when PDFs are available */}
+      {availablePDFs.length > 0 && (
+        <div className="p-3 border-b border-border bg-card/50">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-4xl mx-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2 text-xs"
+              onClick={() => generateContent('flashcard')}
+              disabled={!!isGenerating}
+            >
+              <Brain className="w-3 h-3" />
+              {isGenerating === 'flashcard' ? 'Criando...' : 'Flashcards'}
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2 text-xs"
+              onClick={() => generateContent('resume')}
+              disabled={!!isGenerating}
+            >
+              <FileText className="w-3 h-3" />
+              {isGenerating === 'resume' ? 'Fazendo...' : 'Resumo'}
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2 text-xs"
+              onClick={() => generateContent('quiz')}
+              disabled={!!isGenerating}
+            >
+              <HelpCircle className="w-3 h-3" />
+              {isGenerating === 'quiz' ? 'Criando...' : 'Quiz'}
+            </Button>
+            
+            <Button
+              variant="outline" 
+              size="sm"
+              className="flex items-center gap-2 text-xs"
+              onClick={() => generateContent('prova')}
+              disabled={!!isGenerating}
+            >
+              <Zap className="w-3 h-3" />
+              {isGenerating === 'prova' ? 'Gerando...' : 'Prova'}
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Messages */}
-      <div className="flex-1 p-6 overflow-y-auto">
-        <div className="max-w-4xl mx-auto space-y-4">
+      <div className="flex-1 overflow-y-auto">
+        <div className="p-4 space-y-4 max-w-4xl mx-auto">
+          {/* Show upload area if no PDFs */}
+          {availablePDFs.length === 0 && (
+            <div className="flex flex-col items-center justify-center min-h-[400px] space-y-6">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                <MessageCircle className="w-8 h-8 text-primary" />
+              </div>
+              
+              <div className="text-center space-y-2 max-w-md">
+                <h2 className="text-2xl font-semibold">Bem-vindo ao Chat AI!</h2>
+                <p className="text-muted-foreground">
+                  Envie seus PDFs e comece a fazer perguntas sobre o conteúdo.
+                </p>
+              </div>
+
+              {/* Upload Area */}
+              <div 
+                {...getRootProps()} 
+                className={`w-full max-w-md p-8 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+                  isDragActive 
+                    ? 'border-primary bg-primary/5' 
+                    : 'border-border hover:border-primary/50'
+                }`}
+              >
+                <input {...getInputProps()} />
+                <div className="text-center space-y-4">
+                  <Upload className="w-12 h-12 text-primary mx-auto" />
+                  <div>
+                    <Button className="w-full" disabled={isExtracting}>
+                      {isExtracting ? 'Processando PDF...' : 'Enviar PDF'}
+                    </Button>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Ou arraste e solte seu arquivo aqui
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Chat Messages */}
           {messages.map((message) => (
             <div
               key={message.id}
               className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[80%] p-4 rounded-lg ${
+                className={`max-w-[85%] md:max-w-[70%] p-3 rounded-lg ${
                   message.isUser
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-card border border-border'
                 }`}
               >
-                <p className="text-sm">{message.content}</p>
+                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                 <span className="text-xs opacity-70 mt-2 block">
                   {message.timestamp.toLocaleTimeString()}
                 </span>
               </div>
             </div>
           ))}
+          
           {isLoadingChat && (
             <div className="flex justify-start">
-              <div className="max-w-[80%] p-4 rounded-lg bg-card border border-border">
-                <p className="text-sm">Pensando...</p>
+              <div className="max-w-[85%] md:max-w-[70%] p-3 rounded-lg bg-card border border-border">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                  <span className="text-sm text-muted-foreground ml-2">Analisando...</span>
+                </div>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Input Area */}
-      <div className="p-4 border-t border-border bg-card">
-        <div className="flex gap-2 max-w-4xl mx-auto">
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Digite sua pergunta sobre os PDFs..."
-            className="flex-1"
-            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-          />
-          <Button 
-            onClick={handleSendMessage}
-            disabled={!input.trim() || isLoadingChat}
-          >
-            <Send className="w-4 h-4" />
-          </Button>
+      {/* Input Area - Always visible when PDFs are loaded */}
+      {availablePDFs.length > 0 && (
+        <div className="p-4 border-t border-border bg-card">
+          <div className="flex gap-2 max-w-4xl mx-auto">
+            <Input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Digite sua pergunta sobre os PDFs..."
+              className="flex-1"
+              onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+              disabled={isLoadingChat}
+            />
+            <Button 
+              onClick={handleSendMessage}
+              disabled={!input.trim() || isLoadingChat}
+              size="sm"
+            >
+              <Send className="w-4 h-4" />
+            </Button>
+          </div>
+          
+          {/* Add PDF option */}
+          <div className="flex justify-center mt-2">
+            <div 
+              {...getRootProps()} 
+              className="cursor-pointer"
+            >
+              <input {...getInputProps()} />
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" disabled={isExtracting}>
+                <Upload className="w-3 h-3 mr-1" />
+                {isExtracting ? 'Processando...' : 'Adicionar outro PDF'}
+              </Button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
