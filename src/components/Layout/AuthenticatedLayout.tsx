@@ -16,8 +16,7 @@ import {
   Moon,
   Settings,
   Shield,
-  Heart,
-  Dumbbell
+  Heart
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -46,7 +45,6 @@ const AuthenticatedLayout = () => {
     { href: '/chat', icon: MessageSquare, label: 'Chat AI' },
     { href: '/pdfs', icon: FileText, label: 'Meus PDFs' },
     { href: '/planner', icon: Calendar, label: 'Planner' },
-    { href: '/academia', icon: Dumbbell, label: 'Academia' },
     { href: '/saude', icon: Heart, label: 'Saúde' },
     { href: '/planos', icon: CreditCard, label: 'Planos' },
     { href: '/profile', icon: Settings, label: 'Perfil' },
@@ -144,7 +142,7 @@ const AuthenticatedLayout = () => {
 
       <div className="flex relative z-10">
         {/* Sidebar */}
-        <aside className="hidden md:block w-64 min-h-[calc(100vh-73px)] bg-card/40 backdrop-blur-lg border-r border-primary/20 overflow-y-auto">
+        <aside className="hidden md:block w-64 min-h-[calc(100vh-73px)] bg-card/40 backdrop-blur-lg border-r border-primary/20">
           <nav className="p-4 space-y-2">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -168,10 +166,8 @@ const AuthenticatedLayout = () => {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 p-4 md:p-6 overflow-x-hidden">
-          <div className="w-full max-w-none">
-            <Outlet />
-          </div>
+        <main className="flex-1 p-6">
+          <Outlet />
         </main>
       </div>
     </div>
