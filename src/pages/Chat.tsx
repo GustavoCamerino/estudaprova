@@ -947,7 +947,13 @@ const Chat = () => {
   }
 
   return (
-    <div className="h-[calc(100vh-80px)] flex gap-6 relative">
+    <div 
+      className="h-[calc(100vh-80px)] flex gap-6 relative"
+      onDragEnter={handleDrag}
+      onDragLeave={handleDrag}
+      onDragOver={handleDrag}
+      onDrop={handleDrop}
+    >
       <div
         className="fixed inset-0 opacity-5 pointer-events-none z-0"
         style={{
@@ -956,6 +962,18 @@ const Chat = () => {
           backgroundPosition: 'center'
         }}
       />
+
+      {/* Drag and Drop Overlay */}
+      {dragActive && (
+        <div className="fixed inset-0 bg-primary/10 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="bg-card/90 border-2 border-dashed border-primary rounded-lg p-8 text-center max-w-md">
+            <Upload className="h-16 w-16 mx-auto mb-4 text-primary" />
+            <h3 className="text-lg font-semibold mb-2">Solte o PDF aqui</h3>
+            <p className="text-muted-foreground">Arraste e solte seu arquivo PDF para começar</p>
+            <p className="text-sm text-muted-foreground mt-2">Máximo: 10MB</p>
+          </div>
+        </div>
+      )}
 
       {/* Left Sidebar - Sessions and Quick Actions */}
       <div className="w-80 flex-shrink-0 relative z-10 space-y-4">
