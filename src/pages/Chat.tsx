@@ -37,12 +37,14 @@ const Chat = () => {
   const { isAdmin, isPremium, userRole } = useUserRole();
   const { trackPageView, trackClick, trackUpload } = useAnalytics();
   const { extractTextFromPDF, isExtracting } = usePDFExtractor();
-  const [currentView, setCurrentView] = useState<'chat' | 'flashcard' | 'resume' | 'quiz' | 'prova'>('chat');
+  const [currentView, setCurrentView] = useState<'upload' | 'chat' | 'flashcard' | 'resume' | 'quiz' | 'prova'>('upload');
   const [generatedContent, setGeneratedContent] = useState<any>(null);
   const [pdfCount, setPdfCount] = useState(0);
   const [isGenerating, setIsGenerating] = useState<string | null>(null);
   const [availablePDFs, setAvailablePDFs] = useState<PDFWithJSON[]>([]);
   const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<Array<{id: string, content: string, isUser: boolean, timestamp: Date}>>([]);
+  const [isLoadingChat, setIsLoadingChat] = useState(false);
 
   useEffect(() => {
     trackPageView('/chat');
@@ -123,6 +125,15 @@ const Chat = () => {
       setPdfCount(prev => prev + 1);
       setAvailablePDFs(prev => [...prev, dbData]);
       trackUpload('pdf', '/chat');
+      
+      // Switch to chat view after PDF upload
+      setCurrentView('chat');
+      setMessages([{
+        id: Date.now().toString(),
+        content: `PDF "${file.name}" foi processado com sucesso! Agora você pode fazer perguntas sobre o conteúdo.`,
+        isUser: false,
+        timestamp: new Date()
+      }]);
 
       toast({
         title: "PDF processado com sucesso! 🎉",
@@ -163,9 +174,6 @@ const Chat = () => {
     setIsGenerating(type);
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Usuário não autenticado');
-
       const pdfContent = availablePDFs
         .map(pdf => pdf.extracted_content || '')
         .join('\n\n');
@@ -175,29 +183,73 @@ const Chat = () => {
       }
 
       let prompt = '';
+      let content: any = null;
+
       switch (type) {
         case 'flashcard':
-          prompt = `Crie flashcards baseados no conteúdo: ${pdfContent.substring(0, 2000)}...`;
+          prompt = `Baseado no seguinte conteúdo do PDF, crie exatamente 10 flashcards com perguntas específicas e suas respectivas respostas. 
+          
+          Conteúdo: ${pdfContent.substring(0, 3000)}
+          
+          Formato de resposta:
+          1. Pergunta: [pergunta específica sobre o conteúdo]
+             Resposta: [resposta detalhada]
+          2. Pergunta: [pergunta específica sobre o conteúdo]
+             Resposta: [resposta detalhada]
+          ... e assim por diante até 10 flashcards`;
+          
+          // Parse flashcards from response
+          content = await generateFlashcards(prompt);
           break;
+          
         case 'resume':
-          prompt = `Faça um resumo detalhado do conteúdo: ${pdfContent.substring(0, 2000)}...`;
+          prompt = `Faça um resumo completo e detalhado do seguinte conteúdo de PDF. Use *texto* para destacar partes importantes em negrito:
+          
+          Conteúdo: ${pdfContent.substring(0, 4000)}
+          
+          O resumo deve ser organizado, completo e incluir todos os pontos principais do documento.`;
+          
+          content = await generateSummary(prompt);
           break;
+          
         case 'quiz':
-          prompt = `Crie um quiz com 10 questões baseado no conteúdo: ${pdfContent.substring(0, 2000)}...`;
+          prompt = `Baseado no seguinte conteúdo, crie exatamente 10 questões de múltipla escolha com 4 alternativas cada (A, B, C, D).
+          
+          Conteúdo: ${pdfContent.substring(0, 3000)}
+          
+          Formato de resposta:
+          1. [Pergunta]
+          A) [opção A]
+          B) [opção B] 
+          C) [opção C]
+          D) [opção D]
+          Resposta correta: [letra da resposta]
+          
+          Repita para as 10 questões.`;
+          
+          content = await generateQuiz(prompt);
           break;
+          
         case 'prova':
-          prompt = `Gere uma prova completa com questões múltipla escolha e dissertativas: ${pdfContent.substring(0, 2000)}...`;
+          prompt = `Baseado no seguinte conteúdo, crie uma prova com exatamente 20 questões de múltipla escolha com 4 alternativas cada (A, B, C, D).
+          
+          Conteúdo: ${pdfContent.substring(0, 4000)}
+          
+          Formato de resposta:
+          1. [Pergunta]
+          A) [opção A]
+          B) [opção B]
+          C) [opção C] 
+          D) [opção D]
+          Resposta correta: [letra da resposta]
+          
+          Repita para as 20 questões.`;
+          
+          content = await generateExam(prompt);
           break;
       }
 
-      const { data: resp, error } = await supabase.functions.invoke('ai-processor', {
-        body: { action: 'chat', message: prompt }
-      });
-
-      if (error) throw new Error(error.message);
-      if (!resp?.success) throw new Error(resp?.error || 'Falha ao gerar conteúdo');
-
-      setGeneratedContent({ type, content: resp.response });
+      setGeneratedContent({ type, content });
       setCurrentView(type);
 
       toast({
@@ -217,29 +269,321 @@ const Chat = () => {
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!input.trim()) return;
+  const generateFlashcards = async (prompt: string) => {
+    const response = await callAI(prompt);
+    const lines = response.split('\n');
+    const flashcards = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.match(/^\d+\.\s*Pergunta:/)) {
+        const question = line.replace(/^\d+\.\s*Pergunta:\s*/, '');
+        const answerLine = lines[i + 1]?.trim();
+        if (answerLine?.startsWith('Resposta:')) {
+          const answer = answerLine.replace(/^Resposta:\s*/, '');
+          flashcards.push({
+            id: flashcards.length + 1,
+            question,
+            answer
+          });
+        }
+      }
+    }
+    
+    return flashcards.slice(0, 10); // Ensure exactly 10 flashcards
+  };
 
-    console.log('Sending message:', input);
+  const generateSummary = async (prompt: string) => {
+    const response = await callAI(prompt);
+    // Convert *text* to <strong>text</strong> for HTML rendering
+    return response.replace(/\*(.*?)\*/g, '<strong>$1</strong>');
+  };
+
+  const generateQuiz = async (prompt: string) => {
+    const response = await callAI(prompt);
+    const questions = [];
+    const sections = response.split(/\d+\.\s/).filter(s => s.trim());
+    
+    for (let section of sections.slice(0, 10)) {
+      const lines = section.trim().split('\n').filter(l => l.trim());
+      if (lines.length >= 6) {
+        const questionText = lines[0].trim();
+        const options = [];
+        let correctAnswer = '';
+        
+        for (let line of lines) {
+          if (line.match(/^[A-D]\)/)) {
+            options.push(line.trim());
+          } else if (line.includes('Resposta correta:')) {
+            correctAnswer = line.split(':')[1].trim().toUpperCase();
+          }
+        }
+        
+        if (questionText && options.length === 4 && correctAnswer) {
+          questions.push({
+            id: questions.length + 1,
+            question: questionText,
+            options: options.map(opt => opt.substring(3)), // Remove A), B), etc.
+            correctAnswer: correctAnswer.charCodeAt(0) - 65, // Convert A,B,C,D to 0,1,2,3
+            explanation: `A resposta correta é ${correctAnswer}.`
+          });
+        }
+      }
+    }
+    
+    return questions;
+  };
+
+  const generateExam = async (prompt: string) => {
+    const response = await callAI(prompt);
+    const questions = [];
+    const sections = response.split(/\d+\.\s/).filter(s => s.trim());
+    
+    for (let section of sections.slice(0, 20)) {
+      const lines = section.trim().split('\n').filter(l => l.trim());
+      if (lines.length >= 6) {
+        const questionText = lines[0].trim();
+        const options = [];
+        let correctAnswer = '';
+        
+        for (let line of lines) {
+          if (line.match(/^[A-D]\)/)) {
+            options.push(line.trim());
+          } else if (line.includes('Resposta correta:')) {
+            correctAnswer = line.split(':')[1].trim().toUpperCase();
+          }
+        }
+        
+        if (questionText && options.length === 4 && correctAnswer) {
+          questions.push({
+            id: `mc-${questions.length + 1}`,
+            question: questionText,
+            options: options.map(opt => opt.substring(3)),
+            correctAnswer: correctAnswer.charCodeAt(0) - 65
+          });
+        }
+      }
+    }
+    
+    return { multipleChoice: questions, essays: [] };
+  };
+
+  const callAI = async (prompt: string): Promise<string> => {
+    const { data: resp, error } = await supabase.functions.invoke('ai-processor', {
+      body: { action: 'chat', message: prompt }
+    });
+
+    if (error) throw new Error(error.message);
+    if (!resp?.success) throw new Error(resp?.error || 'Falha ao gerar conteúdo');
+    
+    return resp.response;
+  };
+
+  const handleSendMessage = async () => {
+    if (!input.trim() || availablePDFs.length === 0) return;
+
+    const userMessage = input.trim();
     setInput('');
+    setIsLoadingChat(true);
+
+    // Add user message
+    const userMsg = {
+      id: Date.now().toString(),
+      content: userMessage,
+      isUser: true,
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, userMsg]);
+
+    try {
+      const pdfContent = availablePDFs
+        .map(pdf => pdf.extracted_content || '')
+        .join('\n\n');
+
+      const contextPrompt = `Baseado no seguinte conteúdo de PDF, responda à pergunta do usuário de forma detalhada e precisa:
+
+Conteúdo do PDF: ${pdfContent.substring(0, 4000)}
+
+Pergunta do usuário: ${userMessage}
+
+Responda de forma clara e baseada exclusivamente no conteúdo do PDF fornecido.`;
+
+      const response = await callAI(contextPrompt);
+
+      // Add AI response
+      const aiMsg = {
+        id: (Date.now() + 1).toString(),
+        content: response,
+        isUser: false,
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, aiMsg]);
+
+    } catch (error) {
+      console.error('Chat error:', error);
+      const errorMsg = {
+        id: (Date.now() + 1).toString(),
+        content: 'Desculpe, ocorreu um erro ao processar sua pergunta. Tente novamente.',
+        isUser: false,
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMsg]);
+      
+      toast({
+        title: "Erro no chat",
+        description: "Não foi possível processar sua pergunta.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoadingChat(false);
+    }
   };
 
   if (currentView === 'flashcard' && generatedContent?.type === 'flashcard') {
-    return <FlashcardCarousel cards={generatedContent.content} title="Flashcards Gerados" />;
+    return (
+      <div className="min-h-screen bg-background p-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center gap-4 mb-6">
+            <Button 
+              variant="outline" 
+              onClick={() => setCurrentView('chat')}
+            >
+              ← Voltar ao Chat
+            </Button>
+          </div>
+          <FlashcardCarousel cards={generatedContent.content} title="Flashcards Gerados" />
+        </div>
+      </div>
+    );
   }
 
   if (currentView === 'resume' && generatedContent?.type === 'resume') {
-    return <ResumeViewer title="Resumo Gerado" content={generatedContent.content} />;
+    return (
+      <div className="min-h-screen bg-background p-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center gap-4 mb-6">
+            <Button 
+              variant="outline" 
+              onClick={() => setCurrentView('chat')}
+            >
+              ← Voltar ao Chat
+            </Button>
+            <h1 className="text-2xl font-bold">Resumo Gerado</h1>
+          </div>
+          <Card>
+            <CardContent className="p-6">
+              <div 
+                className="prose max-w-none text-foreground"
+                dangerouslySetInnerHTML={{ __html: generatedContent.content }}
+              />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
   }
 
   if (currentView === 'quiz' && generatedContent?.type === 'quiz') {
-    return <QuizInterface title="Quiz Gerado" questions={generatedContent.content} />;
+    return (
+      <div className="min-h-screen bg-background p-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center gap-4 mb-6">
+            <Button 
+              variant="outline" 
+              onClick={() => setCurrentView('chat')}
+            >
+              ← Voltar ao Chat
+            </Button>
+          </div>
+          <QuizInterface title="Quiz Gerado" questions={generatedContent.content} />
+        </div>
+      </div>
+    );
   }
 
   if (currentView === 'prova' && generatedContent?.type === 'prova') {
-    return <ExamInterface title="Prova Gerada" multipleChoice={generatedContent.content.multipleChoice || []} essays={generatedContent.content.essays || []} />;
+    return (
+      <div className="min-h-screen bg-background p-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center gap-4 mb-6">
+            <Button 
+              variant="outline" 
+              onClick={() => setCurrentView('chat')}
+            >
+              ← Voltar ao Chat
+            </Button>
+          </div>
+          <ExamInterface title="Prova Gerada" multipleChoice={generatedContent.content.multipleChoice || []} essays={generatedContent.content.essays || []} />
+        </div>
+      </div>
+    );
   }
 
+  // Upload view
+  if (currentView === 'upload') {
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-border bg-card">
+          <div className="flex items-center gap-3">
+            <MessageCircle className="w-6 h-6 text-primary" />
+            <h1 className="text-xl font-semibold">Chat AI</h1>
+            {isPremium && (
+              <Badge className="bg-gradient-to-r from-primary to-secondary text-white">
+                <Crown className="w-3 h-3 mr-1" />
+                Premium
+              </Badge>
+            )}
+          </div>
+          <div className="text-sm text-muted-foreground">
+            PDFs: {pdfCount}/3
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-8">
+          {/* Welcome Icon */}
+          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+            <MessageCircle className="w-8 h-8 text-primary" />
+          </div>
+
+          {/* Welcome Text */}
+          <div className="text-center space-y-2 max-w-md">
+            <h2 className="text-2xl font-semibold">Bem-vindo ao Chat AI!</h2>
+            <p className="text-muted-foreground">
+              Envie seus PDFs e comece a fazer perguntas sobre o conteúdo. 
+              Posso criar flashcards, resumos, quizzes e muito mais!
+            </p>
+          </div>
+
+          {/* Upload Area */}
+          <div 
+            {...getRootProps()} 
+            className={`w-full max-w-md p-8 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+              isDragActive 
+                ? 'border-primary bg-primary/5' 
+                : 'border-border hover:border-primary/50'
+            }`}
+          >
+            <input {...getInputProps()} />
+            <div className="text-center space-y-4">
+              <Upload className="w-12 h-12 text-primary mx-auto" />
+              <div>
+                <Button className="w-full">
+                  {isExtracting ? 'Processando...' : 'Enviar PDF'}
+                </Button>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Ou arraste e solte seu arquivo aqui
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Chat view
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
@@ -259,52 +603,14 @@ const Chat = () => {
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-8">
-        {/* Welcome Icon */}
-        <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
-          <MessageCircle className="w-8 h-8 text-primary" />
-        </div>
-
-        {/* Welcome Text */}
-        <div className="text-center space-y-2 max-w-md">
-          <h2 className="text-2xl font-semibold">Bem-vindo ao Chat AI!</h2>
-          <p className="text-muted-foreground">
-            Envie seus PDFs e comece a fazer perguntas sobre o conteúdo. 
-            Posso criar flashcards, resumos, quizzes e muito mais!
-          </p>
-        </div>
-
-        {/* Upload Area */}
-        <div 
-          {...getRootProps()} 
-          className={`w-full max-w-md p-8 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
-            isDragActive 
-              ? 'border-primary bg-primary/5' 
-              : 'border-border hover:border-primary/50'
-          }`}
-        >
-          <input {...getInputProps()} />
-          <div className="text-center space-y-4">
-            <Upload className="w-12 h-12 text-primary mx-auto" />
-            <div>
-              <Button className="w-full">
-                {isExtracting ? 'Processando...' : 'Enviar PDF'}
-              </Button>
-              <p className="text-xs text-muted-foreground mt-2">
-                Ou arraste e solte seu arquivo aqui
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="grid grid-cols-2 gap-4 w-full max-w-md">
+      {/* Action Buttons */}
+      <div className="p-4 border-b border-border bg-card">
+        <div className="grid grid-cols-2 gap-3 max-w-2xl mx-auto">
           <Button
             variant="outline"
-            className="flex items-center gap-2 h-12"
+            className="flex items-center gap-2 h-10"
             onClick={() => generateContent('flashcard')}
-            disabled={!!isGenerating || availablePDFs.length === 0}
+            disabled={!!isGenerating}
           >
             <Brain className="w-4 h-4" />
             {isGenerating === 'flashcard' ? 'Criando...' : 'Criar Flashcards'}
@@ -312,9 +618,9 @@ const Chat = () => {
           
           <Button
             variant="outline"
-            className="flex items-center gap-2 h-12"
+            className="flex items-center gap-2 h-10"
             onClick={() => generateContent('resume')}
-            disabled={!!isGenerating || availablePDFs.length === 0}
+            disabled={!!isGenerating}
           >
             <FileText className="w-4 h-4" />
             {isGenerating === 'resume' ? 'Fazendo...' : 'Fazer Resumo'}
@@ -322,9 +628,9 @@ const Chat = () => {
           
           <Button
             variant="outline"
-            className="flex items-center gap-2 h-12"
+            className="flex items-center gap-2 h-10"
             onClick={() => generateContent('quiz')}
-            disabled={!!isGenerating || availablePDFs.length === 0}
+            disabled={!!isGenerating}
           >
             <HelpCircle className="w-4 h-4" />
             {isGenerating === 'quiz' ? 'Criando...' : 'Criar Quiz'}
@@ -332,13 +638,45 @@ const Chat = () => {
           
           <Button
             variant="outline"
-            className="flex items-center gap-2 h-12"
+            className="flex items-center gap-2 h-10"
             onClick={() => generateContent('prova')}
-            disabled={!!isGenerating || availablePDFs.length === 0}
+            disabled={!!isGenerating}
           >
             <Zap className="w-4 h-4" />
             {isGenerating === 'prova' ? 'Gerando...' : 'Gerar Prova'}
           </Button>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 p-6 overflow-y-auto">
+        <div className="max-w-4xl mx-auto space-y-4">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[80%] p-4 rounded-lg ${
+                  message.isUser
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-card border border-border'
+                }`}
+              >
+                <p className="text-sm">{message.content}</p>
+                <span className="text-xs opacity-70 mt-2 block">
+                  {message.timestamp.toLocaleTimeString()}
+                </span>
+              </div>
+            </div>
+          ))}
+          {isLoadingChat && (
+            <div className="flex justify-start">
+              <div className="max-w-[80%] p-4 rounded-lg bg-card border border-border">
+                <p className="text-sm">Pensando...</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -351,11 +689,10 @@ const Chat = () => {
             placeholder="Digite sua pergunta sobre os PDFs..."
             className="flex-1"
             onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-            disabled={availablePDFs.length === 0}
           />
           <Button 
             onClick={handleSendMessage}
-            disabled={!input.trim() || availablePDFs.length === 0}
+            disabled={!input.trim() || isLoadingChat}
           >
             <Send className="w-4 h-4" />
           </Button>
