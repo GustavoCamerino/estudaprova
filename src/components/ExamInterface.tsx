@@ -134,21 +134,6 @@ const ExamInterface: React.FC<ExamInterfaceProps> = ({ title, multipleChoice, es
 
   if (showResults) {
     const { mcScore, totalMCPoints, totalEssayPoints, totalPoints } = calculateScore();
-    const percentage = Math.round((mcScore / totalMCPoints) * 100);
-    
-    const getScoreColor = (percentage: number) => {
-      if (percentage >= 80) return 'text-green-600';
-      if (percentage >= 60) return 'text-yellow-600';
-      return 'text-red-600';
-    };
-    
-    const getScoreMessage = (percentage: number) => {
-      if (percentage >= 90) return 'Excelente desempenho! 🎉';
-      if (percentage >= 80) return 'Muito bom! 👏';
-      if (percentage >= 70) return 'Bom trabalho! 👍';
-      if (percentage >= 60) return 'Pode melhorar 📚';
-      return 'Precisa estudar mais 💪';
-    };
     
     return (
       <div className="w-full max-w-4xl mx-auto space-y-4">
@@ -162,19 +147,10 @@ const ExamInterface: React.FC<ExamInterfaceProps> = ({ title, multipleChoice, es
         
         <Card>
           <CardHeader>
-            <CardTitle className="text-center space-y-3">
-              <div className={`text-4xl font-bold ${getScoreColor(percentage)}`}>
-                {percentage}%
-              </div>
-              <div className="text-lg">
-                {getScoreMessage(percentage)}
-              </div>
-              <div className="text-base text-muted-foreground space-y-1">
-                <div>Múltipla Escolha: {mcScore}/{totalMCPoints} pontos</div>
-                {totalEssayPoints > 0 && (
-                  <div>Dissertativas: {totalEssayPoints} pontos (correção manual)</div>
-                )}
-              </div>
+            <CardTitle className="text-center">
+              Múltipla Escolha: {mcScore}/{totalMCPoints} pontos
+              <br />
+              Dissertativas: {totalEssayPoints} pontos (correção manual)
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -185,7 +161,7 @@ const ExamInterface: React.FC<ExamInterfaceProps> = ({ title, multipleChoice, es
                 const isCorrect = userAnswer === question.correctAnswer;
                 
                 return (
-                  <div key={question.id} className={`border rounded-lg p-4 space-y-3 mb-4 ${isCorrect ? 'border-green-200 bg-green-50/50' : 'border-red-200 bg-red-50/50'}`}>
+                  <div key={question.id} className="border rounded-lg p-4 space-y-3 mb-4">
                     <div className="flex items-start justify-between">
                       <h5 className="font-medium">
                         {index + 1}. {question.question} ({question.points} pontos)
@@ -199,13 +175,13 @@ const ExamInterface: React.FC<ExamInterfaceProps> = ({ title, multipleChoice, es
                       {question.options.map((option, optIndex) => (
                         <div 
                           key={optIndex}
-                          className={`p-3 rounded-lg text-sm border transition-colors ${
-                            optIndex === question.correctAnswer ? 'bg-green-100 text-green-800 border-green-300' :
-                            optIndex === userAnswer && !isCorrect ? 'bg-red-100 text-red-800 border-red-300' :
+                          className={`p-2 rounded text-sm ${
+                            optIndex === question.correctAnswer ? 'bg-green-100 text-green-800' :
+                            optIndex === userAnswer && !isCorrect ? 'bg-red-100 text-red-800' :
                             'bg-gray-50'
                           }`}
                         >
-                          <span className="font-medium">{String.fromCharCode(97 + optIndex).toUpperCase()}) </span>{option}
+                          {String.fromCharCode(97 + optIndex)}) {option}
                           {optIndex === question.correctAnswer && <span className="ml-2">✓ Correta</span>}
                           {optIndex === userAnswer && !isCorrect && <span className="ml-2">✗ Sua resposta</span>}
                         </div>
@@ -277,14 +253,14 @@ const ExamInterface: React.FC<ExamInterfaceProps> = ({ title, multipleChoice, es
                   <button
                     key={optIndex}
                     onClick={() => handleMCAnswer(question.id, optIndex)}
-                    className={`w-full text-left p-4 rounded-lg border transition-all duration-200 hover:shadow-md ${
+                    className={`w-full text-left p-3 rounded-lg border transition-colors ${
                       mcAnswers[question.id] === optIndex 
-                        ? 'bg-primary/10 border-primary shadow-md' 
-                        : 'hover:bg-muted border-border hover:border-primary/30'
+                        ? 'bg-primary/10 border-primary' 
+                        : 'hover:bg-muted border-border'
                     }`}
                   >
-                    <span className="font-bold mr-3 text-primary">
-                      {String.fromCharCode(97 + optIndex).toUpperCase()})
+                    <span className="font-medium mr-3">
+                      {String.fromCharCode(97 + optIndex)})
                     </span>
                     {option}
                   </button>
