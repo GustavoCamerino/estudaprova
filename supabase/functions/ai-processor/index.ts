@@ -858,7 +858,7 @@ async function extractPDFContent(pdfRecord: any, supabase: any): Promise<string>
       const pdf = await loadingTask.promise;
       console.log(`📚 PDF CARREGADO COM SUCESSO: ${pdf.numPages} páginas`);
 
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      for (let pageNum = 1; pageNum <= Math.min(pdf.numPages, 50); pageNum++) {
         try {
           console.log(`📖 EXTRAINDO PÁGINA ${pageNum}/${pdf.numPages}`);
 

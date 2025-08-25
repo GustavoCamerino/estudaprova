@@ -129,11 +129,7 @@ const Chat = () => {
         const key = normalize(candidate);
         if (used.has(key)) continue;
         used.add(key);
-        const snippetMax = 110;
-        const snippet = candidate.length > snippetMax
-          ? candidate.slice(0, snippetMax).replace(/\s+\S*$/, '') + '...'
-          : candidate;
-        const q = `Página ${i + 1}: Qual é a ideia principal do trecho: "${snippet}"?`;
+        const q = `Página ${i + 1}: O que o PDF afirma sobre este trecho?`;
         const a = candidate.length > 280 ? candidate.slice(0, 277) + '...' : candidate;
         cards.push({ id: (cards.length + 1).toString(), question: q, answer: a });
       }
@@ -377,22 +373,35 @@ const Chat = () => {
     trackClick(`generate-${type}`, '/chat');
     
     try {
-      // Geração 100% no front: usa todo conteúdo dos PDFs disponíveis
-      const allPages: string[] = [];
-      for (const pdf of availablePDFs) {
-        if (pdf?.json_content?.pages?.length) {
-          allPages.push(
-            ...pdf.json_content.pages
-              .map((p: any) => p.content || '')
-              .filter((t: string) => t.trim().length > 0)
-          );
-        } else if (pdf?.extracted_content) {
-          allPages.push(...splitExtractedIntoPages(pdf.extracted_content));
-        }
+      // Primeiro: tentar geração pela IA no backend (lê/aprende os PDFs)
+      const prompts: Record<string, string> = {
+        flashcard: 'Leia e aprenda os PDFs do usuário e gere exatamente 10 flashcards (pergunta e resposta concisa) baseados no conteúdo aprendido. Retorne somente JSON {"cards": [{"id":"1","question":"...","answer":"..."}]}',
+        resume: 'Leia e aprenda os PDFs do usuário e gere um resumo completo, educativo e profissional em Markdown, com títulos, subtítulos e listas. Retorne {"content":"...markdown..."}',
+        quiz: 'Leia e aprenda os PDFs do usuário e gere exatamente 10 questões de múltipla escolha baseadas no conteúdo, com 4 alternativas e explicação. Retorne somente JSON {"questions": [{"id":"1","question":"...","options":["A","B","C","D"],"correctAnswer":0,"explanation":"..."}]}',
+        prova: 'Leia e aprenda os PDFs do usuário e gere uma prova com exatamente 20 questões de múltipla escolha (4 alternativas, uma correta, 1 ponto cada). Retorne somente JSON {"multipleChoice": [{"id":"1","question":"...","options":["A","B","C","D"],"correctAnswer":0,"points":1}]}'
+      };
+
+      const { data: resp, error } = await supabase.functions.invoke('ai-processor', {
+        body: { action: 'generate_content', type, prompt: prompts[type] }
+      });
+
+      if (!error && resp?.success && resp?.content) {
+        setGeneratedContent(resp.content);
+        setCurrentView(type);
+        const typeNames = { flashcard: 'Flashcards', resume: 'Resumo', quiz: 'Quiz', prova: 'Prova' } as const;
+        toast({ title: `${typeNames[type]} gerado com sucesso!`, description: `${typeNames[type]} criado com base nos seus PDFs.` });
+        return;
       }
 
-      const pages = allPages.filter(p => p && p.trim().length > 0);
-      if (pages.length === 0) throw new Error('Não há conteúdo utilizável nos PDFs.');
+      // Fallback: geração local no front caso a edge falhe
+      const firstPdf = availablePDFs[0];
+      let pages: string[] = [];
+      if (firstPdf?.json_content?.pages?.length) {
+        pages = firstPdf.json_content.pages.map((p: any) => p.content || '').filter((t: string) => t.trim().length > 0);
+      } else if (firstPdf?.extracted_content) {
+        pages = splitExtractedIntoPages(firstPdf.extracted_content);
+      }
+      if (pages.length === 0) throw new Error('Falha na geração pela IA e fallback indisponível.');
 
       let content: any = null;
       if (type === 'flashcard') content = generateFlashcardsFromPages(pages, 10);
@@ -404,7 +413,7 @@ const Chat = () => {
       setGeneratedContent(content);
       setCurrentView(type);
       const typeNames = { flashcard: 'Flashcards', resume: 'Resumo', quiz: 'Quiz', prova: 'Prova' } as const;
-      toast({ title: `${typeNames[type]} gerado com sucesso!`, description: `${typeNames[type]} criado com base no(s) seu(s) PDF(s).` });
+      toast({ title: `${typeNames[type]} (fallback)`, description: `Conteúdo criado localmente a partir do PDF.` });
 
     } catch (error) {
       console.error('Generation error:', error);
