@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Zap, Mail, Lock, User, ArrowLeft, CheckCircle } from 'lucide-react';
-// Captcha removido
+import HCaptcha from '@hcaptcha/react-hcaptcha';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -18,7 +18,11 @@ export const AuthPage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   
-  // Captcha removido
+  // Captcha refs and tokens
+  const signInCaptchaRef = useRef<HCaptcha>(null);
+  const signUpCaptchaRef = useRef<HCaptcha>(null);
+  const [signInCaptchaToken, setSignInCaptchaToken] = useState('');
+  const [signUpCaptchaToken, setSignUpCaptchaToken] = useState('');
 
   const [signInData, setSignInData] = useState({
     email: '',
@@ -76,12 +80,15 @@ export const AuthPage = () => {
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await signIn(signInData.email, signInData.password);
+
+    const { error } = await signIn(signInData.email, signInData.password, signInCaptchaToken);
     
     if (!error) {
       navigate('/dashboard');
     } else {
-      // noop
+      // Reset captcha on error
+      signInCaptchaRef.current?.resetCaptcha();
+      setSignInCaptchaToken('');
     }
     
     setLoading(false);
@@ -95,10 +102,13 @@ export const AuthPage = () => {
     }
 
     setLoading(true);
-    const { error } = await signUp(signUpData.email, signUpData.password, signUpData.fullName);
+
+    const { error } = await signUp(signUpData.email, signUpData.password, signUpData.fullName, signUpCaptchaToken);
     
     if (error) {
-      // noop
+      // Reset captcha on error
+      signUpCaptchaRef.current?.resetCaptcha();
+      setSignUpCaptchaToken('');
     }
     
     setLoading(false);
@@ -205,12 +215,22 @@ export const AuthPage = () => {
                     </div>
                   </div>
                   
-                  {/* Captcha removido */}
+                  {/* Captcha para login */}
+                  <div className="space-y-2">
+                    <Label>Verificação de segurança</Label>
+                    <HCaptcha
+                      ref={signInCaptchaRef}
+                      sitekey="10000000-ffff-ffff-ffff-000000000001" // Site key de teste
+                      onVerify={setSignInCaptchaToken}
+                      onExpire={() => setSignInCaptchaToken('')}
+                      onError={() => setSignInCaptchaToken('')}
+                    />
+                  </div>
                   
                   <Button 
                     type="submit" 
                     className="w-full" 
-                    disabled={loading}
+                    disabled={loading || !signInCaptchaToken}
                   >
                     {loading ? 'Entrando...' : 'Entrar'}
                   </Button>
@@ -327,12 +347,22 @@ export const AuthPage = () => {
                     <p className="text-sm text-destructive">As senhas não coincidem</p>
                   )}
                   
-                  {/* Captcha removido */}
+                  {/* Captcha para cadastro */}
+                  <div className="space-y-2">
+                    <Label>Verificação de segurança</Label>
+                    <HCaptcha
+                      ref={signUpCaptchaRef}
+                      sitekey="10000000-ffff-ffff-ffff-000000000001" // Site key de teste
+                      onVerify={setSignUpCaptchaToken}
+                      onExpire={() => setSignUpCaptchaToken('')}
+                      onError={() => setSignUpCaptchaToken('')}
+                    />
+                  </div>
                   
                   <Button 
                     type="submit" 
                     className="w-full" 
-                    disabled={loading || (signUpData.password !== signUpData.confirmPassword && signUpData.confirmPassword !== '')}
+                    disabled={loading || (signUpData.password !== signUpData.confirmPassword && signUpData.confirmPassword !== '') || !signUpCaptchaToken}
                   >
                     {loading ? 'Cadastrando...' : 'Criar conta'}
                   </Button>
