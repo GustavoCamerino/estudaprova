@@ -504,54 +504,122 @@ const Chat = () => {
       }
     }
 
-    const userMessage = input.trim();
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      content: input,
+      isUser: true,
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    const currentInput = input;
     setInput('');
     setIsLoading(true);
 
-    // Add user message to chat
-    const newUserMessage: Message = {
-      id: Date.now().toString(),
-      content: userMessage,
-      isUser: true,
-      timestamp: new Date(),
-      type: 'normal'
-    };
-
-    setMessages(prev => [...prev, newUserMessage]);
-
     try {
-      // Get PDF content if available
-      let pdfContext = '';
-      if (selectedPDFId) {
-        const selectedPDF = availablePDFs.find(pdf => pdf.id === selectedPDFId);
-        if (selectedPDF?.extracted_content) {
-          pdfContext = `\n\nConteúdo do PDF "${selectedPDF.original_name}":\n${selectedPDF.extracted_content}`;
+      // Save user message to database
+      await saveMessageToDatabase(userMessage, currentSessionId, 'normal');
+
+      console.log('Sending message to AI processor:', currentInput);
+
+      // Primeiro, vamos buscar PDFs da sessão atual
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new Error('Usuário não autenticado');
+      }
+
+      // Buscar PDFs da sessão atual
+      const { data: sessionPDFs, error: pdfError } = await supabase
+        .from('pdfs')
+        .select('id, original_name, processing_status, json_content, extracted_content')
+        .eq('user_id', user.id)
+        .eq('session_id', currentSessionId)
+        .order('upload_date', { ascending: false }) as { data: PDFWithJSON[] | null, error: any };
+
+      if (pdfError) {
+        console.error('Erro ao buscar PDFs:', pdfError);
+      }
+
+      console.log('PDFs encontrados na sessão:', sessionPDFs?.length || 0);
+
+      // Usar o PDF selecionado ou o primeiro disponível
+      let pdfId = selectedPDFId;
+      if (!pdfId && sessionPDFs && sessionPDFs.length > 0) {
+        // Verificar se algum PDF tem conteúdo processado
+        const processedPDF = sessionPDFs.find(pdf =>
+          pdf.json_content || pdf.extracted_content || pdf.processing_status === 'completed'
+        );
+
+        if (processedPDF) {
+          pdfId = processedPDF.id;
+          console.log('Usando PDF para pergunta específica:', processedPDF.original_name);
         }
       }
 
-      // Generate AI response based on PDF content
-      const aiResponse = await generateAIResponse(userMessage + pdfContext);
+      // 🔥 Incluir conteúdo extraído dos PDFs na mensagem
+      let enhancedMessage = currentInput;
       
-      // Add AI response to chat
-      const newAIMessage: Message = {
+      if (sessionPDFs && sessionPDFs.length > 0) {
+        const pdfContents = sessionPDFs
+          .filter(pdf => pdf.extracted_content)
+          .map(pdf => `📄 **${pdf.original_name}**:\n${pdf.extracted_content}`)
+          .join('\n\n');
+          
+        if (pdfContents) {
+          enhancedMessage = `CONTEXTO DOS DOCUMENTOS:\n${pdfContents}\n\n---\n\nPERGUNTA DO USUÁRIO: ${currentInput}`;
+          console.log(`✅ Conteúdo de ${sessionPDFs.length} PDFs incluído na mensagem`);
+        }
+      }
+
+      // Call unified AI processor with enhanced message
+      const { data, error } = await supabase.functions.invoke('ai-processor', {
+        body: {
+          action: 'chat',
+          message: enhancedMessage,
+          sessionId: currentSessionId,
+          pdfId: pdfId // Passar o PDF ID se disponível
+        }
+      });
+
+      console.log('AI response received:', data, 'error:', error);
+
+      if (error) {
+        console.error('Supabase function error:', error);
+        throw new Error(error.message || 'Erro na comunicação com IA');
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Erro na resposta da IA');
+      }
+
+      const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: aiResponse,
+        content: data.response || 'Desculpe, não consegui processar sua mensagem.',
         isUser: false,
-        timestamp: new Date(),
-        type: 'normal'
+        timestamp: new Date()
       };
 
-      setMessages(prev => [...prev, newAIMessage]);
+      setMessages(prev => [...prev, aiMessage]);
 
-      // Save messages to database
-      await saveMessageToDatabase(newUserMessage);
-      await saveMessageToDatabase(newAIMessage);
+      // Save AI message to database
+      await saveMessageToDatabase(aiMessage, currentSessionId, 'normal');
 
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error in chat:', error);
+
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: 'Desculpe, ocorreu um erro. Verifique se a GOOGLE_API_KEY está configurada.',
+        isUser: false,
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, aiMessage]);
+
       toast({
-        title: "Erro",
-        description: "Erro ao enviar mensagem.",
+        title: "Erro no chat",
+        description: errorMessage,
         variant: "destructive"
       });
     } finally {
@@ -559,34 +627,15 @@ const Chat = () => {
     }
   };
 
-  const generateAIResponse = async (message: string): Promise<string> => {
-    try {
-      const { data, error } = await supabase.functions.invoke('ai-processor', {
-        body: {
-          action: 'chat',
-          message: message
-        }
-      });
-
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || 'Falha na geração da resposta');
-      
-      return data.response || 'Desculpe, não consegui gerar uma resposta.';
-    } catch (error) {
-      console.error('Error generating AI response:', error);
-      return 'Desculpe, ocorreu um erro ao processar sua mensagem.';
-    }
-  };
-
-  const saveMessageToDatabase = async (message: Message) => {
+  const saveMessageToDatabase = async (message: Message, sessionId: string, messageType?: string) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !currentSessionId) return;
+      if (!user) return;
 
       await supabase
         .from('chat_messages')
         .insert({
-          session_id: currentSessionId,
+          session_id: sessionId,
           user_id: user.id,
           content: message.content,
           is_user: message.isUser,
@@ -594,394 +643,6 @@ const Chat = () => {
         });
     } catch (error) {
       console.error('Error saving message:', error);
-    }
-  };
-
-  const generateFlashcards = async (topic: string) => {
-    if (!availablePDFs.length) {
-      toast({
-        title: "Nenhum PDF encontrado",
-        description: "Faça upload de um PDF primeiro.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsGenerating('flashcard');
-    setCurrentView('flashcard');
-
-    try {
-      const selectedPDF = availablePDFs.find(pdf => pdf.id === selectedPDFId);
-      const pdfContent = selectedPDF?.extracted_content || '';
-      
-      const prompt = `Com base no seguinte conteúdo do PDF, crie 10 flashcards com perguntas específicas e suas respectivas respostas sobre "${topic}":
-
-${pdfContent}
-
-Crie 10 flashcards no formato JSON:
-{
-  "flashcards": [
-    {
-      "pergunta": "Pergunta específica sobre o conteúdo",
-      "resposta": "Resposta clara e objetiva"
-    }
-  ]
-}
-
-Foque em perguntas que testem a compreensão dos conceitos principais do documento.`;
-
-      console.log('Gerando flashcards...');
-      
-      const response = await generateAIResponse(prompt);
-      
-      // Parse the response to extract flashcards
-      let flashcards;
-      try {
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          flashcards = JSON.parse(jsonMatch[0]);
-        } else {
-          // Fallback: create simple flashcards from response
-          const lines = response.split('\n').filter(line => line.trim());
-          const cards = [];
-          for (let i = 0; i < Math.min(lines.length, 20); i += 2) {
-            if (i + 1 < lines.length) {
-              cards.push({
-                pergunta: lines[i].replace(/^\d+\.?\s*/, ''),
-                resposta: lines[i + 1]
-              });
-            }
-          }
-          flashcards = { flashcards: cards.slice(0, 10) };
-        }
-      } catch (parseError) {
-        flashcards = {
-          flashcards: [
-            { pergunta: "Conteúdo do PDF", resposta: response }
-          ]
-        };
-      }
-
-      setGeneratedContent(flashcards);
-      
-      toast({
-        title: "Flashcards gerados!",
-        description: `${flashcards.flashcards?.length || 1} flashcards criados com sucesso.`
-      });
-
-    } catch (error) {
-      console.error('Error generating flashcards:', error);
-      toast({
-        title: "Erro",
-        description: "Erro ao gerar flashcards.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsGenerating(null);
-    }
-  };
-
-  const generateResume = async (topic: string) => {
-    if (!availablePDFs.length) {
-      toast({
-        title: "Nenhum PDF encontrado",
-        description: "Faça upload de um PDF primeiro.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsGenerating('resume');
-    setCurrentView('resume');
-
-    try {
-      const selectedPDF = availablePDFs.find(pdf => pdf.id === selectedPDFId);
-      const pdfContent = selectedPDF?.extracted_content || '';
-      
-      const prompt = `Faça um resumo completo e detalhado do seguinte conteúdo sobre "${topic}":
-
-${pdfContent}
-
-O resumo deve:
-- Ser completo e abrangente
-- Incluir todos os pontos principais
-- Usar formatação com *texto* para negrito quando necessário
-- Ser bem estruturado com tópicos e subtópicos
-- Incluir exemplos quando relevante
-- Manter a ordem lógica do conteúdo original
-
-Formate o texto de forma clara e didática para facilitar o estudo.`;
-
-      console.log('Gerando resumo...');
-      
-      const response = await generateAIResponse(prompt);
-      
-      setGeneratedContent({ resume: response });
-      
-      toast({
-        title: "Resumo gerado!",
-        description: "Resumo completo criado com sucesso."
-      });
-
-    } catch (error) {
-      console.error('Error generating resume:', error);
-      toast({
-        title: "Erro",
-        description: "Erro ao gerar resumo.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsGenerating(null);
-    }
-  };
-
-  const generateQuiz = async (topic: string) => {
-    if (!availablePDFs.length) {
-      toast({
-        title: "Nenhum PDF encontrado",
-        description: "Faça upload de um PDF primeiro.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsGenerating('quiz');
-    setCurrentView('quiz');
-
-    try {
-      const selectedPDF = availablePDFs.find(pdf => pdf.id === selectedPDFId);
-      const pdfContent = selectedPDF?.extracted_content || '';
-      
-      const prompt = `Com base no seguinte conteúdo, crie um quiz com 10 questões sobre "${topic}":
-
-${pdfContent}
-
-Crie questões de múltipla escolha no formato JSON:
-{
-  "quiz": {
-    "questions": [
-      {
-        "question": "Pergunta clara e específica sobre o conteúdo?",
-        "options": ["Opção A", "Opção B", "Opção C", "Opção D"],
-        "correct": 0,
-        "explanation": "Explicação da resposta correta"
-      }
-    ]
-  }
-}
-
-Certifique-se de que:
-- As perguntas testam compreensão real do conteúdo
-- As opções de resposta são plausíveis
-- Há apenas uma resposta correta por questão
-- As explicações esclarecem por que a resposta está correta`;
-
-      console.log('Gerando quiz...');
-      
-      const response = await generateAIResponse(prompt);
-      
-      // Parse the response to extract quiz
-      let quiz;
-      try {
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          quiz = JSON.parse(jsonMatch[0]);
-        } else {
-          // Fallback: create simple quiz from response
-          const lines = response.split('\n').filter(line => line.trim());
-          const questions = [];
-          
-          for (let i = 0; i < Math.min(lines.length, 40); i += 4) {
-            if (i + 3 < lines.length) {
-              questions.push({
-                question: lines[i].replace(/^\d+\.?\s*/, ''),
-                options: [
-                  lines[i + 1] || "Opção A",
-                  lines[i + 2] || "Opção B", 
-                  lines[i + 3] || "Opção C",
-                  "Nenhuma das anteriores"
-                ],
-                correct: 0,
-                explanation: "Resposta baseada no conteúdo do PDF"
-              });
-            }
-          }
-          
-          quiz = { 
-            quiz: { 
-              questions: questions.slice(0, 10).length > 0 ? questions.slice(0, 10) : [{
-                question: "O que você aprendeu com este conteúdo?",
-                options: ["Conceitos importantes", "Informações básicas", "Detalhes específicos", "Conhecimento geral"],
-                correct: 0,
-                explanation: "Baseado no conteúdo estudado"
-              }]
-            }
-          };
-        }
-      } catch (parseError) {
-        quiz = {
-          quiz: {
-            questions: [{
-              question: "Qual é o tema principal do conteúdo estudado?",
-              options: ["Tema A", "Tema B", "Tema C", "Tema D"],
-              correct: 0,
-              explanation: "Baseado no PDF fornecido"
-            }]
-          }
-        };
-      }
-
-      setGeneratedContent(quiz);
-      
-      toast({
-        title: "Quiz gerado!",
-        description: `Quiz com ${quiz.quiz?.questions?.length || 1} questões criado.`
-      });
-
-    } catch (error) {
-      console.error('Error generating quiz:', error);
-      toast({
-        title: "Erro",
-        description: "Erro ao gerar quiz.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsGenerating(null);
-    }
-  };
-
-  const generateExam = async (topic: string) => {
-    if (!availablePDFs.length) {
-      toast({
-        title: "Nenhum PDF encontrado",
-        description: "Faça upload de um PDF primeiro.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsGenerating('prova');
-    setCurrentView('prova');
-
-    try {
-      const selectedPDF = availablePDFs.find(pdf => pdf.id === selectedPDFId);
-      const pdfContent = selectedPDF?.extracted_content || '';
-      
-      const prompt = `Com base no seguinte conteúdo, crie uma prova com 20 questões de múltipla escolha sobre "${topic}":
-
-${pdfContent}
-
-Crie questões diversificadas no formato JSON:
-{
-  "exam": {
-    "title": "Prova sobre ${topic}",
-    "questions": [
-      {
-        "question": "Pergunta clara e específica sobre o conteúdo?",
-        "options": ["A) Opção A", "B) Opção B", "C) Opção C", "D) Opção D"],
-        "correct": 0,
-        "explanation": "Explicação da resposta correta"
-      }
-    ]
-  }
-}
-
-Certifique-se de que:
-- Crie exatamente 20 questões
-- As perguntas cobrem diferentes aspectos do conteúdo
-- As opções são rotuladas com A), B), C), D)
-- Há variação na dificuldade das questões
-- As perguntas testam compreensão profunda do material`;
-
-      console.log('Gerando prova...');
-      
-      const response = await generateAIResponse(prompt);
-      
-      // Parse the response to extract exam
-      let exam;
-      try {
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          exam = JSON.parse(jsonMatch[0]);
-        } else {
-          // Fallback: create questions from response text
-          const lines = response.split('\n').filter(line => line.trim());
-          const questions = [];
-          
-          for (let i = 0; i < 20; i++) {
-            const questionIndex = i * 6; // Assume 6 lines per question (question + 4 options + explanation)
-            if (questionIndex < lines.length) {
-              questions.push({
-                question: lines[questionIndex] || `Questão ${i + 1} sobre ${topic}?`,
-                options: [
-                  lines[questionIndex + 1] || `A) Primeira opção`,
-                  lines[questionIndex + 2] || `B) Segunda opção`,
-                  lines[questionIndex + 3] || `C) Terceira opção`, 
-                  lines[questionIndex + 4] || `D) Quarta opção`
-                ],
-                correct: Math.floor(Math.random() * 4), // Random for fallback
-                explanation: lines[questionIndex + 5] || "Baseado no conteúdo do PDF"
-              });
-            } else {
-              questions.push({
-                question: `Questão ${i + 1}: Com base no conteúdo estudado, qual conceito é mais importante?`,
-                options: [
-                  `A) Conceito fundamental do tema`,
-                  `B) Aspecto secundário do assunto`,
-                  `C) Detalhe específico mencionado`,
-                  `D) Conclusão geral do material`
-                ],
-                correct: 0,
-                explanation: "Baseado na análise do conteúdo fornecido"
-              });
-            }
-          }
-          
-          exam = { 
-            exam: { 
-              title: `Prova sobre ${topic}`,
-              questions: questions
-            }
-          };
-        }
-      } catch (parseError) {
-        // Create 20 generic questions as absolute fallback
-        const questions = Array.from({ length: 20 }, (_, i) => ({
-          question: `Questão ${i + 1}: Sobre o tema "${topic}", qual afirmação está correta?`,
-          options: [
-            `A) Primeira alternativa sobre ${topic}`,
-            `B) Segunda alternativa sobre ${topic}`,
-            `C) Terceira alternativa sobre ${topic}`,
-            `D) Quarta alternativa sobre ${topic}`
-          ],
-          correct: 0,
-          explanation: "Baseado no conteúdo do PDF fornecido"
-        }));
-        
-        exam = {
-          exam: {
-            title: `Prova sobre ${topic}`,
-            questions: questions
-          }
-        };
-      }
-
-      setGeneratedContent(exam);
-      
-      toast({
-        title: "Prova gerada!",
-        description: `Prova com ${exam.exam?.questions?.length || 20} questões criada.`
-      });
-
-    } catch (error) {
-      console.error('Error generating exam:', error);
-      toast({
-        title: "Erro",
-        description: "Erro ao gerar prova.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsGenerating(null);
     }
   };
 
@@ -1022,21 +683,92 @@ Certifique-se de que:
     // Track click event
     trackClick(`quick_prompt_${type}`, '/chat');
 
-    const topic = "o conteúdo do PDF"; // Default topic
-    
-    switch (type) {
-      case 'flashcard':
-        await generateFlashcards(topic);
-        break;
-      case 'resume':
-        await generateResume(topic);
-        break;
-      case 'quiz':
-        await generateQuiz(topic);
-        break;
-      case 'prova':
-        await generateExam(topic);
-        break;
+    setIsGenerating(type); // Set which content is being generated
+
+    try {
+      console.log('Calling AI processor for content generation');
+
+      // Show loading toast
+      toast({
+        title: `Gerando ${type === 'flashcard' ? 'Flashcards' :
+          type === 'resume' ? 'Resumo' :
+            type === 'quiz' ? 'Quiz' : 'Prova'}...`,
+        description: "Aguarde enquanto processamos seu conteúdo.",
+      });
+
+      const { data, error } = await supabase.functions.invoke('ai-processor', {
+        body: {
+          action: 'generate_content',
+          type: type,
+          prompt: prompt,
+          sessionId: currentSessionId
+        }
+      });
+
+      console.log('Content generation response:', data, 'error:', error);
+
+      if (error) {
+        console.error('Supabase function error:', error);
+        throw new Error(error.message || 'Erro na geração de conteúdo');
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Erro na geração de conteúdo');
+      }
+
+      setGeneratedContent(data);
+      setCurrentView(type);
+      setQuestionCount(prev => prev + 1);
+
+      // Save generated content to database
+      await saveGeneratedContentToDB(data, type);
+
+      // Save to conversation history
+      const newMessage: SavedMessage = {
+        id: Date.now().toString(),
+        title: `${type === 'flashcard' ? 'Flashcards' :
+          type === 'resume' ? 'Resumo' :
+            type === 'quiz' ? 'Quiz' : 'Prova'} - ${new Date().toLocaleDateString()}`,
+        content: JSON.stringify(data.content),
+        type,
+        category: 'IA Gerada',
+        createdAt: new Date()
+      };
+
+      setSavedMessages(prev => [newMessage, ...prev]);
+
+      toast({
+        title: "Conteúdo gerado!",
+        description: `${type === 'flashcard' ? 'Flashcards criados' :
+          type === 'resume' ? 'Resumo criado' :
+            type === 'quiz' ? 'Quiz criado' : 'Prova criada'} com sucesso.`,
+      });
+
+    } catch (error) {
+      console.error('Error generating content:', error);
+
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+
+      toast({
+        title: "Erro na geração",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    } finally {
+      setIsGenerating(null); // Clear generating state
+    }
+  };
+
+  const saveGeneratedContentToDB = async (data: any, type: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !currentSessionId) return;
+
+      // Note: generated_content table requires pdf_id, so we'll skip saving for now
+      // This would need to be updated to link to a specific PDF or handle it differently
+      console.log('Generated content saved to local state only');
+    } catch (error) {
+      console.error('Error saving generated content:', error);
     }
   };
 
@@ -1133,7 +865,7 @@ Certifique-se de que:
               ← Voltar ao Chat
             </Button>
             <FlashcardCarousel
-              cards={generatedContent.flashcards || []}
+              cards={generatedContent.content.cards}
               title="Flashcards Gerados"
             />
           </div>
@@ -1150,8 +882,8 @@ Certifique-se de que:
               ← Voltar ao Chat
             </Button>
             <ResumeViewer
-              title="Resumo Gerado"
-              content={generatedContent.resume || ''}
+              title={generatedContent.content.title}
+              content={generatedContent.content.content}
             />
           </div>
         );
@@ -1167,8 +899,8 @@ Certifique-se de que:
               ← Voltar ao Chat
             </Button>
             <QuizInterface
-              title="Quiz Gerado"
-              questions={generatedContent.quiz?.questions || []}
+              title={generatedContent.content.title}
+              questions={generatedContent.content.questions}
             />
           </div>
         );
@@ -1184,9 +916,9 @@ Certifique-se de que:
               ← Voltar ao Chat
             </Button>
             <ExamInterface
-              title={generatedContent.exam?.title || "Prova Gerada"}
-              multipleChoice={generatedContent.exam?.questions || []}
-              essays={[]}
+              title={generatedContent.content.title}
+              multipleChoice={generatedContent.content.multipleChoice}
+              essays={generatedContent.content.essays}
             />
           </div>
         );
@@ -1430,7 +1162,7 @@ Certifique-se de que:
                 <div className="text-center text-muted-foreground py-20">
                   <Bot className="h-16 w-16 mx-auto mb-6 opacity-50" />
                   <h3 className="text-xl font-medium mb-2">Bem-vindo ao Chat AI!</h3>
-                  <p className="text-lg">Faça upload de um PDF e use as ações rápidas ou digite sua mensagem</p>
+                  <p className="text-lg">Use as ações rápidas na barra lateral ou digite sua mensagem</p>
                 </div>
               ) : (
                 messages.map((message) => (
@@ -1489,129 +1221,94 @@ Certifique-se de que:
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area - ALWAYS VISIBLE when PDFs are uploaded */}
-            {(availablePDFs.length > 0 || uploadedFiles.length > 0) && (
-              <div className="border-t p-6">
-                {/* Show selected PDF info */}
-                {selectedPDFId && availablePDFs.length > 0 && (
-                  <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                    <div className="flex items-center space-x-2">
-                      <FileText className="h-4 w-4 text-blue-600" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                          Usando PDF: {availablePDFs.find(pdf => pdf.id === selectedPDFId)?.original_name}
-                        </p>
-                        <p className="text-xs text-blue-700 dark:text-blue-300">
-                          Suas perguntas serão respondidas com base neste documento
-                        </p>
+            {/* Input Area */}
+            <div className="border-t p-6">
+              {/* Show selected PDF info */}
+              {selectedPDFId && availablePDFs.length > 0 && (
+                <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <div className="flex items-center space-x-2">
+                    <FileText className="h-4 w-4 text-blue-600" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                        Usando PDF: {availablePDFs.find(pdf => pdf.id === selectedPDFId)?.original_name}
+                      </p>
+                      <p className="text-xs text-blue-700 dark:text-blue-300">
+                        Suas perguntas serão respondidas com base neste documento
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Show uploaded files */}
+              {uploadedFiles.length > 0 && (
+                <div className="mb-4 space-y-2">
+                  <h4 className="text-sm font-medium text-muted-foreground">Arquivos selecionados:</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {uploadedFiles.map((file, index) => (
+                      <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded-lg text-sm">
+                        <File className="h-4 w-4" />
+                        <span>{file.name}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {Math.round(file.size / 1024)} KB
+                        </Badge>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFile(index)}
+                          className="h-6 w-6 p-0"
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
                       </div>
-                    </div>
+                    ))}
                   </div>
-                )}
-
-                {/* Show uploaded files */}
-                {uploadedFiles.length > 0 && (
-                  <div className="mb-4 space-y-2">
-                    <h4 className="text-sm font-medium text-muted-foreground">Arquivos selecionados:</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {uploadedFiles.map((file, index) => (
-                        <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded-lg text-sm">
-                          <File className="h-4 w-4" />
-                          <span>{file.name}</span>
-                          <Badge variant="outline" className="text-xs">
-                            {Math.round(file.size / 1024)} KB
-                          </Badge>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeFile(index)}
-                            className="h-6 w-6 p-0"
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex space-x-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploading || (!isAdmin && pdfCount >= 3)}
-                    size="icon"
-                    className="h-12 w-12 flex-shrink-0"
-                    title={(!isAdmin && pdfCount >= 3) ? 'Limite de PDFs atingido' : 'Upload de PDF (máx. 10MB)'}
-                  >
-                    <Upload className="h-5 w-5" />
-                  </Button>
-                  <Textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyPress={handleKeyPress}
-                    placeholder="Digite sua mensagem sobre o PDF (ex: 'crie flashcards', 'faça um resumo', 'gere um quiz')..."
-                    className="flex-1 min-h-[48px] max-h-[120px] resize-none text-base"
-                    disabled={isLoading}
-                  />
-                  <Button
-                    onClick={handleSendMessage}
-                    disabled={!input.trim() || isLoading}
-                    size="icon"
-                    className="h-12 w-12 flex-shrink-0"
-                  >
-                    <Send className="h-5 w-5" />
-                  </Button>
                 </div>
+              )}
 
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  multiple
-                  onChange={handleFileInputChange}
-                  className="hidden"
+              <div className="flex space-x-3">
+                <Button
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading || (!isAdmin && pdfCount >= 3)}
+                  size="icon"
+                  className="h-12 w-12 flex-shrink-0"
+                  title={(!isAdmin && pdfCount >= 3) ? 'Limite de PDFs atingido' : 'Upload de PDF (máx. 10MB)'}
+                >
+                  <Upload className="h-5 w-5" />
+                </Button>
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Digite sua mensagem (ex: 'crie flashcards', 'faça um resumo', 'gere um quiz')..."
+                  className="flex-1 min-h-[48px] max-h-[120px] resize-none text-base"
+                  disabled={isLoading}
                 />
-
-                <div className="flex justify-between items-center mt-3 text-xs text-muted-foreground">
-                  <span>PDFs: {isAdmin ? `${pdfCount}/∞` : `${pdfCount}/3`} • Perguntas: {isAdmin ? `${questionCount}/∞` : `${questionCount}/5`} • Máx: 10MB</span>
-                  {isUploading && <span>Enviando arquivo...</span>}
-                </div>
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={!input.trim() || isLoading}
+                  size="icon"
+                  className="h-12 w-12 flex-shrink-0"
+                >
+                  <Send className="h-5 w-5" />
+                </Button>
               </div>
-            )}
 
-            {/* Upload Area - Only show when no PDFs uploaded */}
-            {availablePDFs.length === 0 && uploadedFiles.length === 0 && (
-              <div className="border-t p-6">
-                <div className="text-center">
-                  <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                  <h3 className="text-lg font-medium mb-2">Comece fazendo upload de um PDF</h3>
-                  <p className="text-muted-foreground mb-4">
-                    Arraste e solte um arquivo PDF aqui ou clique no botão abaixo
-                  </p>
-                  <Button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploading || (!isAdmin && pdfCount >= 3)}
-                    className="mb-2"
-                  >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Selecionar PDF
-                  </Button>
-                  <p className="text-xs text-muted-foreground">
-                    Máximo: 10MB • PDFs: {isAdmin ? `${pdfCount}/∞` : `${pdfCount}/3`}
-                  </p>
-                </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                multiple
+                onChange={handleFileInputChange}
+                className="hidden"
+              />
 
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  multiple
-                  onChange={handleFileInputChange}
-                  className="hidden"
-                />
+              <div className="flex justify-between items-center mt-3 text-xs text-muted-foreground">
+                <span>PDFs: {isAdmin ? `${pdfCount}/∞` : `${pdfCount}/3`} • Perguntas: {isAdmin ? `${questionCount}/∞` : `${questionCount}/5`} • Máx: 10MB</span>
+                {isUploading && <span>Enviando arquivo...</span>}
               </div>
-            )}
+            </div>
           </CardContent>
         </Card>
       </div>
