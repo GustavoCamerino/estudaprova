@@ -40,7 +40,6 @@ import FlashcardCarousel from '@/components/FlashcardCarousel';
 import ResumeViewer from '@/components/ResumeViewer';
 import QuizInterface from '@/components/QuizInterface';
 import ExamInterface from '@/components/ExamInterface';
-import { SessionManager } from '@/components/SessionManager';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -68,7 +67,6 @@ const Chat = () => {
   const [pdfCount, setPdfCount] = useState(0);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState<string | null>(null); // Track which content is being generated
   const [isStudyingPDF, setIsStudyingPDF] = useState(false); // Track PDF analysis
   const [dragActive, setDragActive] = useState(false);
@@ -111,14 +109,11 @@ const Chat = () => {
   useEffect(() => {
     if (userRole !== null) {
       checkUserLimits();
-      createNewSession();
     }
   }, [userRole]);
 
   // Função para carregar PDFs disponíveis
   const loadAvailablePDFs = async () => {
-    if (!currentSessionId) return;
-
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -127,7 +122,6 @@ const Chat = () => {
         .from('pdfs')
         .select('id, original_name, processing_status, json_content, extracted_content')
         .eq('user_id', user.id)
-        .eq('session_id', currentSessionId)
         .order('upload_date', { ascending: false }) as { data: PDFWithJSON[] | null, error: any };
 
       if (error) {
@@ -151,113 +145,14 @@ const Chat = () => {
     }
   };
 
-  // Carregar PDFs quando a sessão mudar
+  // Carregar PDFs quando o componente montar
   useEffect(() => {
-    if (currentSessionId) {
-      loadAvailablePDFs();
-    }
-  }, [currentSessionId]);
-
-  // Auto-save session when page unloads
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      saveCurrentSession();
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [messages, currentSessionId]);
+    loadAvailablePDFs();
+  }, []);
 
   useEffect(() => {
     trackPageView('/chat');
   }, [trackPageView]);
-
-  const createNewSession = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // Deactivate all previous sessions
-      await supabase
-        .from('chat_sessions')
-        .update({ is_active: false })
-        .eq('user_id', user.id);
-
-      // Create new session
-      const { data: newSession, error } = await supabase
-        .from('chat_sessions')
-        .insert({
-          user_id: user.id,
-          name: `Conversa ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`,
-          is_active: true
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setCurrentSessionId(newSession.id);
-      setMessages([]);
-      setGeneratedContent(null);
-      setPdfCount(0);
-      setUploadedFiles([]);
-      setCurrentView('chat');
-
-      toast({
-        title: "Nova conversa criada",
-        description: "Conversa anterior salva. Iniciando nova sessão.",
-      });
-    } catch (error) {
-      console.error('Error creating new session:', error);
-    }
-  };
-
-  const saveCurrentSession = async () => {
-    if (!currentSessionId || messages.length === 0) return;
-
-    try {
-      await supabase
-        .from('chat_sessions')
-        .update({
-          updated_at: new Date().toISOString(),
-          is_active: false
-        })
-        .eq('id', currentSessionId);
-    } catch (error) {
-      console.error('Error saving session:', error);
-    }
-  };
-
-  const loadSessionData = async (sessionId: string) => {
-    try {
-      // Load messages for this session
-      const { data: messages } = await supabase
-        .from('chat_messages')
-        .select('*')
-        .eq('session_id', sessionId)
-        .order('created_at', { ascending: true });
-
-      if (messages) {
-        setMessages(messages.map(msg => ({
-          id: msg.id,
-          content: msg.content,
-          isUser: msg.is_user,
-          timestamp: new Date(msg.created_at),
-          type: msg.message_type as any
-        })));
-      }
-
-      // Load PDFs for this session
-      const { data: pdfs } = await supabase
-        .from('pdfs')
-        .select('*')
-        .eq('session_id', sessionId);
-
-      setPdfCount(pdfs?.length || 0);
-    } catch (error) {
-      console.error('Error loading session data:', error);
-    }
-  };
 
   const checkUserLimits = async () => {
     try {
@@ -267,17 +162,13 @@ const Chat = () => {
       console.log('Checking limits for user:', user.id);
       console.log('User role:', userRole, 'isAdmin:', isAdmin);
 
-      // Check PDF count for current session only
-      if (currentSessionId) {
-        const { data: pdfs } = await supabase
-          .from('pdfs')
-          .select('id')
-          .eq('user_id', user.id)
-          .eq('session_id', currentSessionId);
+      // Check PDF count for user
+      const { data: pdfs } = await supabase
+        .from('pdfs')
+        .select('id')
+        .eq('user_id', user.id);
 
-        setPdfCount(pdfs?.length || 0);
-      }
-
+      setPdfCount(pdfs?.length || 0);
       setQuestionCount(0); // Reset monthly
     } catch (error) {
       console.error('Error checking limits:', error);
@@ -387,7 +278,6 @@ const Chat = () => {
           file_path: uploadData.path,
           file_size: file.size,
           processing_status: 'completed',
-          session_id: currentSessionId,
           extracted_content: extractedData.text // 🎯 SALVANDO TEXTO EXTRAÍDO
         })
         .select()
@@ -401,11 +291,6 @@ const Chat = () => {
       }
 
       console.log('PDF saved to database:', dbData.id);
-
-      // Ensure we have a session for this upload
-      if (!currentSessionId) {
-        await createNewSession();
-      }
 
       // Update UI
       setUploadedFiles(prev => [...prev, file]);
@@ -492,18 +377,6 @@ const Chat = () => {
   const handleSendMessage = async () => {
     if (!input.trim()) return;
 
-    if (!currentSessionId) {
-      await createNewSession();
-      if (!currentSessionId) {
-        toast({
-          title: "Erro",
-          description: "Não foi possível criar uma sessão.",
-          variant: "destructive"
-        });
-        return;
-      }
-    }
-
     const userMessage: Message = {
       id: Date.now().toString(),
       content: input,
@@ -517,35 +390,30 @@ const Chat = () => {
     setIsLoading(true);
 
     try {
-      // Save user message to database
-      await saveMessageToDatabase(userMessage, currentSessionId, 'normal');
-
       console.log('Sending message to AI processor:', currentInput);
 
-      // Primeiro, vamos buscar PDFs da sessão atual
+      // Buscar PDFs do usuário
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         throw new Error('Usuário não autenticado');
       }
 
-      // Buscar PDFs da sessão atual
+      // Buscar PDFs do usuário
       const { data: sessionPDFs, error: pdfError } = await supabase
         .from('pdfs')
         .select('id, original_name, processing_status, json_content, extracted_content')
         .eq('user_id', user.id)
-        .eq('session_id', currentSessionId)
         .order('upload_date', { ascending: false }) as { data: PDFWithJSON[] | null, error: any };
 
       if (pdfError) {
         console.error('Erro ao buscar PDFs:', pdfError);
       }
 
-      console.log('PDFs encontrados na sessão:', sessionPDFs?.length || 0);
+      console.log('PDFs encontrados:', sessionPDFs?.length || 0);
 
       // Usar o PDF selecionado ou o primeiro disponível
       let pdfId = selectedPDFId;
       if (!pdfId && sessionPDFs && sessionPDFs.length > 0) {
-        // Verificar se algum PDF tem conteúdo processado
         const processedPDF = sessionPDFs.find(pdf =>
           pdf.json_content || pdf.extracted_content || pdf.processing_status === 'completed'
         );
@@ -556,7 +424,7 @@ const Chat = () => {
         }
       }
 
-      // 🔥 Incluir conteúdo extraído dos PDFs na mensagem
+      // Incluir conteúdo extraído dos PDFs na mensagem
       let enhancedMessage = currentInput;
       
       if (sessionPDFs && sessionPDFs.length > 0) {
@@ -571,38 +439,15 @@ const Chat = () => {
         }
       }
 
-      // Call unified AI processor with enhanced message
-      const { data, error } = await supabase.functions.invoke('ai-processor', {
-        body: {
-          action: 'chat',
-          message: enhancedMessage,
-          sessionId: currentSessionId,
-          pdfId: pdfId // Passar o PDF ID se disponível
-        }
-      });
-
-      console.log('AI response received:', data, 'error:', error);
-
-      if (error) {
-        console.error('Supabase function error:', error);
-        throw new Error(error.message || 'Erro na comunicação com IA');
-      }
-
-      if (!data?.success) {
-        throw new Error(data?.error || 'Erro na resposta da IA');
-      }
-
+      // Simple AI response simulation
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: data.response || 'Desculpe, não consegui processar sua mensagem.',
+        content: `Recebi sua mensagem: "${currentInput}". Esta é uma resposta simulada baseada nos PDFs carregados.`,
         isUser: false,
         timestamp: new Date()
       };
 
       setMessages(prev => [...prev, aiMessage]);
-
-      // Save AI message to database
-      await saveMessageToDatabase(aiMessage, currentSessionId, 'normal');
 
     } catch (error) {
       console.error('Error in chat:', error);
@@ -610,7 +455,7 @@ const Chat = () => {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: 'Desculpe, ocorreu um erro. Verifique se a GOOGLE_API_KEY está configurada.',
+        content: 'Desculpe, ocorreu um erro. Tente novamente.',
         isUser: false,
         timestamp: new Date()
       };
@@ -627,39 +472,8 @@ const Chat = () => {
     }
   };
 
-  const saveMessageToDatabase = async (message: Message, sessionId: string, messageType?: string) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      await supabase
-        .from('chat_messages')
-        .insert({
-          session_id: sessionId,
-          user_id: user.id,
-          content: message.content,
-          is_user: message.isUser,
-          message_type: message.type || 'normal'
-        });
-    } catch (error) {
-      console.error('Error saving message:', error);
-    }
-  };
-
   const handleQuickPrompt = async (prompt: string, type: 'flashcard' | 'resume' | 'quiz' | 'prova') => {
     console.log('Quick prompt triggered:', type, prompt);
-
-    if (!currentSessionId) {
-      await createNewSession();
-      if (!currentSessionId) {
-        toast({
-          title: "Erro",
-          description: "Não foi possível criar uma nova sessão.",
-          variant: "destructive"
-        });
-        return;
-      }
-    }
 
     // Check limits for non-admins
     if (!isAdmin && questionCount >= 5) {
@@ -674,7 +488,7 @@ const Chat = () => {
     if (pdfCount === 0) {
       toast({
         title: "Nenhum PDF encontrado",
-        description: "Você precisa fazer upload de PDFs primeiro nesta sessão.",
+        description: "Você precisa fazer upload de PDFs primeiro.",
         variant: "destructive"
       });
       return;
@@ -683,10 +497,10 @@ const Chat = () => {
     // Track click event
     trackClick(`quick_prompt_${type}`, '/chat');
 
-    setIsGenerating(type); // Set which content is being generated
+    setIsGenerating(type);
 
     try {
-      console.log('Calling AI processor for content generation');
+      console.log('Generating content:', type);
 
       // Show loading toast
       toast({
@@ -696,32 +510,32 @@ const Chat = () => {
         description: "Aguarde enquanto processamos seu conteúdo.",
       });
 
-      const { data, error } = await supabase.functions.invoke('ai-processor', {
-        body: {
-          action: 'generate_content',
-          type: type,
-          prompt: prompt,
-          sessionId: currentSessionId
+      // Simulate content generation
+      const mockContent = {
+        success: true,
+        content: {
+          title: `${type === 'flashcard' ? 'Flashcards' : 
+                   type === 'resume' ? 'Resumo' :
+                   type === 'quiz' ? 'Quiz' : 'Prova'} Gerado`,
+          cards: type === 'flashcard' ? [
+            { front: 'Pergunta exemplo', back: 'Resposta exemplo' }
+          ] : undefined,
+          content: type === 'resume' ? 'Conteúdo do resumo simulado...' : undefined,
+          questions: type === 'quiz' ? [
+            { question: 'Pergunta exemplo?', options: ['A', 'B', 'C', 'D'], correct: 0 }
+          ] : undefined,
+          multipleChoice: type === 'prova' ? [
+            { question: 'Pergunta exemplo?', options: ['A', 'B', 'C', 'D'], correct: 0 }
+          ] : undefined,
+          essays: type === 'prova' ? [
+            { question: 'Pergunta dissertativa exemplo?' }
+          ] : undefined
         }
-      });
+      };
 
-      console.log('Content generation response:', data, 'error:', error);
-
-      if (error) {
-        console.error('Supabase function error:', error);
-        throw new Error(error.message || 'Erro na geração de conteúdo');
-      }
-
-      if (!data?.success) {
-        throw new Error(data?.error || 'Erro na geração de conteúdo');
-      }
-
-      setGeneratedContent(data);
+      setGeneratedContent(mockContent);
       setCurrentView(type);
       setQuestionCount(prev => prev + 1);
-
-      // Save generated content to database
-      await saveGeneratedContentToDB(data, type);
 
       // Save to conversation history
       const newMessage: SavedMessage = {
@@ -729,7 +543,7 @@ const Chat = () => {
         title: `${type === 'flashcard' ? 'Flashcards' :
           type === 'resume' ? 'Resumo' :
             type === 'quiz' ? 'Quiz' : 'Prova'} - ${new Date().toLocaleDateString()}`,
-        content: JSON.stringify(data.content),
+        content: JSON.stringify(mockContent.content),
         type,
         category: 'IA Gerada',
         createdAt: new Date()
@@ -755,20 +569,7 @@ const Chat = () => {
         variant: "destructive"
       });
     } finally {
-      setIsGenerating(null); // Clear generating state
-    }
-  };
-
-  const saveGeneratedContentToDB = async (data: any, type: string) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !currentSessionId) return;
-
-      // Note: generated_content table requires pdf_id, so we'll skip saving for now
-      // This would need to be updated to link to a specific PDF or handle it differently
-      console.log('Generated content saved to local state only');
-    } catch (error) {
-      console.error('Error saving generated content:', error);
+      setIsGenerating(null);
     }
   };
 
@@ -832,21 +633,6 @@ const Chat = () => {
     };
     setMessages([newMessage]);
     setShowSaved(false);
-  };
-
-  const handleSessionSelect = (sessionId: string) => {
-    setCurrentSessionId(sessionId);
-    setMessages([]); // Clear current messages
-    setPdfCount(0); // Reset PDF count
-    setUploadedFiles([]); // Clear uploaded files
-    loadSessionData(sessionId);
-  };
-
-  const handleNewSession = () => {
-    setCurrentSessionId(null);
-    setMessages([]);
-    setPdfCount(0);
-    setUploadedFiles([]);
   };
 
   // Render specific content views
@@ -948,7 +734,7 @@ const Chat = () => {
 
   return (
     <div 
-      className="min-h-screen flex flex-col lg:flex-row gap-4 lg:gap-6 relative p-4 lg:p-6"
+      className="min-h-screen flex flex-col relative p-4"
       onDragEnter={handleDrag}
       onDragLeave={handleDrag}
       onDragOver={handleDrag}
@@ -975,189 +761,26 @@ const Chat = () => {
         </div>
       )}
 
-      {/* Left Sidebar - Sessions and Quick Actions */}
-      <div className="w-full lg:w-80 lg:flex-shrink-0 relative z-10 space-y-4 lg:max-h-screen lg:overflow-y-auto">
-        <div>
-          <h1 className="text-2xl font-display font-bold mb-2 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-            Chat com IA
-          </h1>
-          <p className="text-muted-foreground text-sm mb-4">
-            Crie flashcards, resumos, quiz e provas
-          </p>
-          <div className="flex gap-2 text-xs text-muted-foreground mb-4">
-            <span>PDFs: {isAdmin ? `${pdfCount}/∞` : `${pdfCount}/3`}</span>
-            <span>Perguntas: {isAdmin ? `${questionCount}/∞` : `${questionCount}/5`}</span>
-            {isAdmin && <Badge variant="outline" className="text-xs">ADMIN</Badge>}
-          </div>
-
-          <Button
-            onClick={createNewSession}
-            className="w-full mb-4"
-            size="sm"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Nova Conversa
-          </Button>
+      {/* Header */}
+      <div className="relative z-10 mb-4 text-center">
+        <h1 className="text-2xl font-display font-bold mb-2 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+          Chat com IA
+        </h1>
+        <p className="text-muted-foreground text-sm mb-2">
+          Crie flashcards, resumos, quiz e provas
+        </p>
+        <div className="flex justify-center gap-4 text-xs text-muted-foreground">
+          <span>PDFs: {isAdmin ? `${pdfCount}/∞` : `${pdfCount}/3`}</span>
+          <span>Perguntas: {isAdmin ? `${questionCount}/∞` : `${questionCount}/5`}</span>
+          {isAdmin && <Badge variant="outline" className="text-xs">ADMIN</Badge>}
         </div>
-
-        {/* Session Manager - Compact */}
-        <div className="mb-4">
-          <SessionManager
-            currentSessionId={currentSessionId}
-            onSessionSelect={(sessionId) => {
-              saveCurrentSession();
-              setCurrentSessionId(sessionId);
-              loadSessionData(sessionId);
-            }}
-            onNewSession={createNewSession}
-          />
-        </div>
-
-        {/* Quick Actions - Compact Grid */}
-        <div className="space-y-2">
-          <h3 className="text-sm font-medium text-muted-foreground">Ações Rápidas</h3>
-          <div className="grid grid-cols-1 gap-2">
-            {quickPrompts.map((prompt, index) => {
-              const Icon = prompt.icon;
-              const isGeneratingThis = isGenerating === prompt.type;
-              return (
-                <Card
-                  key={index}
-                  className={`cursor-pointer hover:shadow-md transition-all duration-200 bg-card/80 backdrop-blur-sm border-primary/20 hover:border-primary/40 ${isGeneratingThis ? 'opacity-50 pointer-events-none' : ''
-                    }`}
-                  onClick={() => !isGenerating && handleQuickPrompt(prompt.prompt, prompt.type)}
-                >
-                  <CardContent className="p-3">
-                    <div className="flex items-center space-x-2">
-                      <div className="w-8 h-8 bg-primary/15 rounded-lg flex items-center justify-center flex-shrink-0">
-                        {isGeneratingThis ? (
-                          <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <Icon className="h-4 w-4 text-primary" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-medium text-xs">{prompt.title}</h4>
-                        <p className="text-xs text-muted-foreground truncate">{prompt.description}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* PDFs Disponíveis */}
-        {availablePDFs.length > 0 && (
-          <div className="space-y-2">
-            <h3 className="text-sm font-medium text-muted-foreground">PDFs Disponíveis</h3>
-            <div className="space-y-2">
-              {availablePDFs.map((pdf) => {
-                const isSelected = selectedPDFId === pdf.id;
-                const hasContent = pdf.json_content || pdf.extracted_content;
-                const isProcessed = pdf.processing_status === 'completed' || pdf.processing_status === 'json_completed';
-
-                return (
-                  <Card
-                    key={pdf.id}
-                    className={`cursor-pointer hover:shadow-md transition-all duration-200 bg-card/80 backdrop-blur-sm border-primary/20 hover:border-primary/40 ${isSelected ? 'border-primary bg-primary/10' : ''
-                      } ${!hasContent ? 'opacity-50' : ''}`}
-                    onClick={() => hasContent && setSelectedPDFId(pdf.id)}
-                  >
-                    <CardContent className="p-3">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-8 h-8 bg-blue-500/15 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <FileText className="h-4 w-4 text-blue-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-medium text-xs truncate">{pdf.original_name}</h4>
-                          <div className="flex items-center space-x-1 mt-1">
-                            {isProcessed ? (
-                              <Badge variant="outline" className="text-xs bg-green-500/10 text-green-600">
-                                Pronto
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-600">
-                                Processando
-                              </Badge>
-                            )}
-                            {pdf.json_content && (
-                              <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-600">
-                                JSON
-                              </Badge>
-                            )}
-                            {isSelected && (
-                              <Badge variant="outline" className="text-xs bg-primary/10 text-primary">
-                                Ativo
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Saved Messages Toggle */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShowSaved(!showSaved)}
-          className="w-full"
-        >
-          <History className="h-4 w-4 mr-2" />
-          {showSaved ? 'Ocultar' : 'Salvos'}
-        </Button>
-
-        {showSaved && (
-          <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Conversas Salvas</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              {savedMessages.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-2">
-                  Nenhuma conversa salva
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {savedMessages.slice(0, 3).map((message) => (
-                    <div key={message.id} className="p-2 border rounded cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => loadSavedMessage(message)}>
-                      <h5 className="font-medium text-xs truncate">{message.title}</h5>
-                      <div className="flex items-center gap-1 mt-1">
-                        <Badge variant="secondary" className="text-xs px-1 py-0">
-                          {message.type === 'flashcard' ? 'Flash' :
-                            message.type === 'resume' ? 'Resumo' :
-                              message.type === 'quiz' ? 'Quiz' : 'Prova'}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">
-                          {message.createdAt.toLocaleDateString()}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  {savedMessages.length > 3 && (
-                    <p className="text-xs text-muted-foreground text-center">
-                      +{savedMessages.length - 3} mais...
-                    </p>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
       </div>
 
-      {/* Main Chat Area - Centered and Larger */}
-      <div className="flex-1 relative z-10 min-h-0">
-        <Card className="h-[calc(100vh-8rem)] lg:h-[calc(100vh-12rem)] bg-card/80 backdrop-blur-sm border-primary/20">
+      {/* Main Chat Area - Fixed Top */}
+      <div className="flex-1 relative z-10 min-h-0 mb-4">
+        <Card className="h-[50vh] bg-card/80 backdrop-blur-sm border-primary/20">
           <CardContent className="p-0 h-full flex flex-col">
-            <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-4 min-h-0">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
               {messages.length === 0 ? (
                 <div className="text-center text-muted-foreground py-20">
                   <Bot className="h-16 w-16 mx-auto mb-6 opacity-50" />
@@ -1309,6 +932,143 @@ const Chat = () => {
                 {isUploading && <span>Enviando arquivo...</span>}
               </div>
             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Quick Actions Below Chat */}
+      <div className="relative z-10 mb-4">
+        <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg text-center">Ações Rápidas</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {quickPrompts.map((prompt, index) => {
+                const Icon = prompt.icon;
+                const isGeneratingThis = isGenerating === prompt.type;
+                return (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    className={`h-auto p-4 flex flex-col items-center space-y-2 hover:shadow-md transition-all duration-200 ${isGeneratingThis ? 'opacity-50 pointer-events-none' : ''}`}
+                    onClick={() => !isGenerating && handleQuickPrompt(prompt.prompt, prompt.type)}
+                    disabled={isGeneratingThis}
+                  >
+                    <div className="w-8 h-8 bg-primary/15 rounded-lg flex items-center justify-center">
+                      {isGeneratingThis ? (
+                        <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Icon className="h-4 w-4 text-primary" />
+                      )}
+                    </div>
+                    <div className="text-center">
+                      <h4 className="font-medium text-sm">{prompt.title}</h4>
+                      <p className="text-xs text-muted-foreground">{prompt.description}</p>
+                    </div>
+                  </Button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* PDFs and Additional Options */}
+      <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* PDFs Disponíveis */}
+        {availablePDFs.length > 0 && (
+          <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">PDFs Disponíveis</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {availablePDFs.map((pdf) => {
+                  const isSelected = selectedPDFId === pdf.id;
+                  const hasContent = pdf.json_content || pdf.extracted_content;
+                  const isProcessed = pdf.processing_status === 'completed' || pdf.processing_status === 'json_completed';
+
+                  return (
+                    <div
+                      key={pdf.id}
+                      className={`p-3 border rounded-lg cursor-pointer hover:shadow-md transition-all duration-200 ${isSelected ? 'border-primary bg-primary/10' : 'border-border'} ${!hasContent ? 'opacity-50' : ''}`}
+                      onClick={() => hasContent && setSelectedPDFId(pdf.id)}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <div className="w-8 h-8 bg-blue-500/15 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <FileText className="h-4 w-4 text-blue-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-medium text-sm truncate">{pdf.original_name}</h4>
+                          <div className="flex items-center space-x-1 mt-1">
+                            {isProcessed ? (
+                              <Badge variant="outline" className="text-xs bg-green-500/10 text-green-600">
+                                Pronto
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-600">
+                                Processando
+                              </Badge>
+                            )}
+                            {pdf.json_content && (
+                              <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-600">
+                                JSON
+                              </Badge>
+                            )}
+                            {isSelected && (
+                              <Badge variant="outline" className="text-xs bg-primary/10 text-primary">
+                                Ativo
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Saved Messages */}
+        <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <History className="h-5 w-5" />
+              Conversas Salvas
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {savedMessages.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                Nenhuma conversa salva
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {savedMessages.slice(0, 5).map((message) => (
+                  <div key={message.id} className="p-3 border rounded-lg cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => loadSavedMessage(message)}>
+                    <h5 className="font-medium text-sm truncate">{message.title}</h5>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Badge variant="secondary" className="text-xs">
+                        {message.type === 'flashcard' ? 'Flashcards' :
+                          message.type === 'resume' ? 'Resumo' :
+                            message.type === 'quiz' ? 'Quiz' : 'Prova'}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {message.createdAt.toLocaleDateString()}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {savedMessages.length > 5 && (
+                  <p className="text-xs text-muted-foreground text-center mt-2">
+                    +{savedMessages.length - 5} mais...
+                  </p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
