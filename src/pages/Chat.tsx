@@ -734,21 +734,12 @@ const Chat = () => {
 
   return (
     <div 
-      className="min-h-screen flex flex-col relative p-4"
+      className="min-h-screen flex relative bg-background"
       onDragEnter={handleDrag}
       onDragLeave={handleDrag}
       onDragOver={handleDrag}
       onDrop={handleDrop}
     >
-      <div
-        className="fixed inset-0 opacity-5 pointer-events-none z-0"
-        style={{
-          backgroundImage: `url(https://images.unsplash.com/photo-1513836279014-a89f7a76ae86?w=1920&h=1080&fit=crop)`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center'
-        }}
-      />
-
       {/* Drag and Drop Overlay */}
       {dragActive && (
         <div className="fixed inset-0 bg-primary/10 backdrop-blur-sm z-50 flex items-center justify-center">
@@ -761,316 +752,300 @@ const Chat = () => {
         </div>
       )}
 
-      {/* Header */}
-      <div className="relative z-10 mb-4 text-center">
-        <h1 className="text-2xl font-display font-bold mb-2 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-          Chat com IA
-        </h1>
-        <p className="text-muted-foreground text-sm mb-2">
-          Crie flashcards, resumos, quiz e provas
-        </p>
-        <div className="flex justify-center gap-4 text-xs text-muted-foreground">
-          <span>PDFs: {isAdmin ? `${pdfCount}/∞` : `${pdfCount}/3`}</span>
-          <span>Perguntas: {isAdmin ? `${questionCount}/∞` : `${questionCount}/5`}</span>
-          {isAdmin && <Badge variant="outline" className="text-xs">ADMIN</Badge>}
+      {/* Left Sidebar - Dark Theme like ChatGPT */}
+      <div className="w-80 flex-shrink-0 bg-slate-900 dark:bg-slate-950 text-white flex flex-col h-screen overflow-hidden">
+        {/* Header */}
+        <div className="p-4 border-b border-slate-700">
+          <h1 className="text-xl font-semibold text-white mb-2">
+            Chat com IA
+          </h1>
+          <div className="flex flex-wrap gap-2 text-xs text-slate-300">
+            <span>PDFs: {isAdmin ? `${pdfCount}/∞` : `${pdfCount}/3`}</span>
+            <span>Perguntas: {isAdmin ? `${questionCount}/∞` : `${questionCount}/5`}</span>
+            {isAdmin && <Badge variant="secondary" className="text-xs bg-slate-700 text-slate-200">ADMIN</Badge>}
+          </div>
         </div>
-      </div>
 
-      {/* Main Chat Area - Fixed Top */}
-      <div className="flex-1 relative z-10 min-h-0 mb-4">
-        <Card className="h-[50vh] bg-card/80 backdrop-blur-sm border-primary/20">
-          <CardContent className="p-0 h-full flex flex-col">
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-              {messages.length === 0 ? (
-                <div className="text-center text-muted-foreground py-20">
-                  <Bot className="h-16 w-16 mx-auto mb-6 opacity-50" />
-                  <h3 className="text-xl font-medium mb-2">Bem-vindo ao Chat AI!</h3>
-                  <p className="text-lg">Use as ações rápidas na barra lateral ou digite sua mensagem</p>
-                </div>
-              ) : (
-                messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex items-start space-x-4 ${message.isUser ? 'flex-row-reverse space-x-reverse' : ''
-                      }`}
-                  >
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${message.isUser
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground'
-                      }`}>
-                      {message.isUser ? <User className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
-                    </div>
-                    <div className={`flex-1 max-w-[75%] ${message.isUser ? 'text-right' : ''}`}>
-                      <div className={`rounded-xl p-4 ${message.isUser
-                        ? 'bg-primary text-primary-foreground ml-auto'
-                        : 'bg-muted'
-                        }`}>
-                        <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
-                        {!message.isUser && (
-                          <div className="flex justify-end mt-3">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleSaveMessage(message.content)}
-                              className="text-xs h-7 px-3 hover:bg-background/20"
-                            >
-                              <Save className="h-3 w-3 mr-1" />
-                              Salvar
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-2 px-1">
-                        {message.timestamp.toLocaleTimeString()}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-              {isLoading && (
-                <div className="flex items-start space-x-4">
-                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                    <Bot className="h-5 w-5" />
-                  </div>
-                  <div className="bg-muted rounded-xl p-4">
-                    <div className="flex space-x-1">
-                      <div className="w-2 h-2 bg-current rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Input Area */}
-            <div className="border-t p-4 lg:p-6 flex-shrink-0">
-              {/* Show selected PDF info */}
-              {selectedPDFId && availablePDFs.length > 0 && (
-                <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                  <div className="flex items-center space-x-2">
-                    <FileText className="h-4 w-4 text-blue-600" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                        Usando PDF: {availablePDFs.find(pdf => pdf.id === selectedPDFId)?.original_name}
-                      </p>
-                      <p className="text-xs text-blue-700 dark:text-blue-300">
-                        Suas perguntas serão respondidas com base neste documento
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Show uploaded files */}
-              {uploadedFiles.length > 0 && (
-                <div className="mb-4 space-y-2">
-                  <h4 className="text-sm font-medium text-muted-foreground">Arquivos selecionados:</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {uploadedFiles.map((file, index) => (
-                      <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded-lg text-sm">
-                        <File className="h-4 w-4" />
-                        <span>{file.name}</span>
-                        <Badge variant="outline" className="text-xs">
-                          {Math.round(file.size / 1024)} KB
-                        </Badge>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeFile(index)}
-                          className="h-6 w-6 p-0"
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex space-x-3">
-                <Button
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading || (!isAdmin && pdfCount >= 3)}
-                  size="icon"
-                  className="h-12 w-12 flex-shrink-0"
-                  title={(!isAdmin && pdfCount >= 3) ? 'Limite de PDFs atingido' : 'Upload de PDF (máx. 10MB)'}
-                >
-                  <Upload className="h-5 w-5" />
-                </Button>
-                <Textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Digite sua mensagem (ex: 'crie flashcards', 'faça um resumo', 'gere um quiz')..."
-                  className="flex-1 min-h-[48px] max-h-[120px] resize-none text-base"
-                  disabled={isLoading}
-                />
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={!input.trim() || isLoading}
-                  size="icon"
-                  className="h-12 w-12 flex-shrink-0"
-                >
-                  <Send className="h-5 w-5" />
-                </Button>
-              </div>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf"
-                multiple
-                onChange={handleFileInputChange}
-                className="hidden"
-              />
-
-              <div className="flex justify-between items-center mt-3 text-xs text-muted-foreground">
-                <span>PDFs: {isAdmin ? `${pdfCount}/∞` : `${pdfCount}/3`} • Perguntas: {isAdmin ? `${questionCount}/∞` : `${questionCount}/5`} • Máx: 10MB</span>
-                {isUploading && <span>Enviando arquivo...</span>}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Quick Actions Below Chat */}
-      <div className="relative z-10 mb-4">
-        <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg text-center">Ações Rápidas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Quick Actions */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium text-slate-300">Ações Rápidas</h3>
+            <div className="space-y-2">
               {quickPrompts.map((prompt, index) => {
                 const Icon = prompt.icon;
                 const isGeneratingThis = isGenerating === prompt.type;
                 return (
-                  <Button
+                  <button
                     key={index}
-                    variant="outline"
-                    className={`h-auto p-4 flex flex-col items-center space-y-2 hover:shadow-md transition-all duration-200 ${isGeneratingThis ? 'opacity-50 pointer-events-none' : ''}`}
+                    className={`w-full p-3 text-left rounded-lg transition-all duration-200 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 ${isGeneratingThis ? 'opacity-50 pointer-events-none' : ''}`}
                     onClick={() => !isGenerating && handleQuickPrompt(prompt.prompt, prompt.type)}
                     disabled={isGeneratingThis}
                   >
-                    <div className="w-8 h-8 bg-primary/15 rounded-lg flex items-center justify-center">
-                      {isGeneratingThis ? (
-                        <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <Icon className="h-4 w-4 text-primary" />
-                      )}
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center flex-shrink-0">
+                        {isGeneratingThis ? (
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <Icon className="h-4 w-4 text-white" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium text-sm text-white">{prompt.title}</h4>
+                        <p className="text-xs text-slate-400 truncate">{prompt.description}</p>
+                      </div>
                     </div>
-                    <div className="text-center">
-                      <h4 className="font-medium text-sm">{prompt.title}</h4>
-                      <p className="text-xs text-muted-foreground">{prompt.description}</p>
-                    </div>
-                  </Button>
+                  </button>
                 );
               })}
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
 
-      {/* PDFs and Additional Options */}
-      <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* PDFs Disponíveis */}
-        {availablePDFs.length > 0 && (
-          <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg">PDFs Disponíveis</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-40 overflow-y-auto">
+          {/* PDFs Disponíveis */}
+          {availablePDFs.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-slate-300">PDFs Disponíveis</h3>
+              <div className="space-y-2">
                 {availablePDFs.map((pdf) => {
                   const isSelected = selectedPDFId === pdf.id;
                   const hasContent = pdf.json_content || pdf.extracted_content;
                   const isProcessed = pdf.processing_status === 'completed' || pdf.processing_status === 'json_completed';
 
                   return (
-                    <div
+                    <button
                       key={pdf.id}
-                      className={`p-3 border rounded-lg cursor-pointer hover:shadow-md transition-all duration-200 ${isSelected ? 'border-primary bg-primary/10' : 'border-border'} ${!hasContent ? 'opacity-50' : ''}`}
+                      className={`w-full p-3 text-left rounded-lg transition-all duration-200 border ${
+                        isSelected 
+                          ? 'bg-blue-600/20 border-blue-500 text-white' 
+                          : 'hover:bg-slate-800 border-slate-700 hover:border-slate-600 text-slate-200'
+                      } ${!hasContent ? 'opacity-50' : ''}`}
                       onClick={() => hasContent && setSelectedPDFId(pdf.id)}
+                      disabled={!hasContent}
                     >
-                      <div className="flex items-center space-x-2">
-                        <div className="w-8 h-8 bg-blue-500/15 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <FileText className="h-4 w-4 text-blue-600" />
+                      <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 bg-blue-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <FileText className="h-4 w-4 text-blue-400" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <h4 className="font-medium text-sm truncate">{pdf.original_name}</h4>
                           <div className="flex items-center space-x-1 mt-1">
                             {isProcessed ? (
-                              <Badge variant="outline" className="text-xs bg-green-500/10 text-green-600">
+                              <span className="text-xs px-2 py-0.5 bg-green-600/20 text-green-400 rounded">
                                 Pronto
-                              </Badge>
+                              </span>
                             ) : (
-                              <Badge variant="outline" className="text-xs bg-yellow-500/10 text-yellow-600">
+                              <span className="text-xs px-2 py-0.5 bg-yellow-600/20 text-yellow-400 rounded">
                                 Processando
-                              </Badge>
-                            )}
-                            {pdf.json_content && (
-                              <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-600">
-                                JSON
-                              </Badge>
+                              </span>
                             )}
                             {isSelected && (
-                              <Badge variant="outline" className="text-xs bg-primary/10 text-primary">
+                              <span className="text-xs px-2 py-0.5 bg-blue-600/20 text-blue-400 rounded">
                                 Ativo
-                              </Badge>
+                              </span>
                             )}
                           </div>
                         </div>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
-            </CardContent>
-          </Card>
-        )}
+            </div>
+          )}
 
-        {/* Saved Messages */}
-        <Card className="bg-card/80 backdrop-blur-sm border-primary/20">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <History className="h-5 w-5" />
-              Conversas Salvas
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {savedMessages.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                Nenhuma conversa salva
-              </p>
-            ) : (
-              <div className="space-y-2 max-h-40 overflow-y-auto">
+          {/* Saved Messages */}
+          {savedMessages.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-slate-300">Conversas Salvas</h3>
+              <div className="space-y-2">
                 {savedMessages.slice(0, 5).map((message) => (
-                  <div key={message.id} className="p-3 border rounded-lg cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => loadSavedMessage(message)}>
-                    <h5 className="font-medium text-sm truncate">{message.title}</h5>
+                  <button
+                    key={message.id}
+                    className="w-full p-3 text-left rounded-lg hover:bg-slate-800 border border-slate-700 hover:border-slate-600 transition-colors"
+                    onClick={() => loadSavedMessage(message)}
+                  >
+                    <h5 className="font-medium text-sm text-white truncate">{message.title}</h5>
                     <div className="flex items-center gap-2 mt-1">
-                      <Badge variant="secondary" className="text-xs">
+                      <span className="text-xs px-2 py-0.5 bg-slate-700 text-slate-300 rounded">
                         {message.type === 'flashcard' ? 'Flashcards' :
                           message.type === 'resume' ? 'Resumo' :
                             message.type === 'quiz' ? 'Quiz' : 'Prova'}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
+                      </span>
+                      <span className="text-xs text-slate-400">
                         {message.createdAt.toLocaleDateString()}
                       </span>
                     </div>
-                  </div>
+                  </button>
                 ))}
-                {savedMessages.length > 5 && (
-                  <p className="text-xs text-muted-foreground text-center mt-2">
-                    +{savedMessages.length - 5} mais...
-                  </p>
-                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col h-screen bg-background">
+        {/* Chat Header */}
+        <div className="border-b border-border p-4 bg-card/50">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">Assistente de Estudos</h2>
+              <p className="text-sm text-muted-foreground">
+                Crie flashcards, resumos, quiz e provas com IA
+              </p>
+            </div>
+            {selectedPDFId && availablePDFs.length > 0 && (
+              <div className="flex items-center space-x-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <FileText className="h-4 w-4 text-blue-600" />
+                <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                  {availablePDFs.find(pdf => pdf.id === selectedPDFId)?.original_name}
+                </span>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+
+        {/* Chat Messages */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {messages.length === 0 ? (
+            <div className="text-center text-muted-foreground py-20">
+              <Bot className="h-16 w-16 mx-auto mb-6 opacity-50" />
+              <h3 className="text-xl font-medium mb-2">Bem-vindo ao Chat AI!</h3>
+              <p className="text-lg">Use as ações rápidas na barra lateral ou digite sua mensagem abaixo</p>
+            </div>
+          ) : (
+            messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex items-start space-x-4 ${message.isUser ? 'flex-row-reverse space-x-reverse' : ''}`}
+              >
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  message.isUser
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-muted-foreground'
+                }`}>
+                  {message.isUser ? <User className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
+                </div>
+                <div className={`flex-1 max-w-[80%] ${message.isUser ? 'text-right' : ''}`}>
+                  <div className={`rounded-2xl p-4 ${
+                    message.isUser
+                      ? 'bg-primary text-primary-foreground ml-auto'
+                      : 'bg-muted'
+                  }`}>
+                    <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                    {!message.isUser && (
+                      <div className="flex justify-end mt-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleSaveMessage(message.content)}
+                          className="text-xs h-7 px-3 hover:bg-background/20"
+                        >
+                          <Save className="h-3 w-3 mr-1" />
+                          Salvar
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2 px-1">
+                    {message.timestamp.toLocaleTimeString()}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
+          {isLoading && (
+            <div className="flex items-start space-x-4">
+              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                <Bot className="h-5 w-5" />
+              </div>
+              <div className="bg-muted rounded-2xl p-4">
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-current rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-current rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input Area */}
+        <div className="border-t border-border p-4 bg-card/50">
+          {/* Show uploaded files */}
+          {uploadedFiles.length > 0 && (
+            <div className="mb-4 space-y-2">
+              <h4 className="text-sm font-medium text-muted-foreground">Arquivos selecionados:</h4>
+              <div className="flex flex-wrap gap-2">
+                {uploadedFiles.map((file, index) => (
+                  <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded-lg text-sm">
+                    <File className="h-4 w-4" />
+                    <span>{file.name}</span>
+                    <Badge variant="outline" className="text-xs">
+                      {Math.round(file.size / 1024)} KB
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeFile(index)}
+                      className="h-6 w-6 p-0"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="max-w-4xl mx-auto">
+            <div className="flex space-x-3 items-end">
+              <Button
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading || (!isAdmin && pdfCount >= 3)}
+                size="icon"
+                className="h-12 w-12 flex-shrink-0"
+                title={(!isAdmin && pdfCount >= 3) ? 'Limite de PDFs atingido' : 'Upload de PDF (máx. 10MB)'}
+              >
+                <Upload className="h-5 w-5" />
+              </Button>
+              <div className="flex-1 relative">
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder="Digite sua mensagem (ex: 'crie flashcards', 'faça um resumo', 'gere um quiz')..."
+                  className="min-h-[60px] max-h-[200px] resize-none text-base pr-12 rounded-2xl border-2"
+                  disabled={isLoading}
+                />
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={!input.trim() || isLoading}
+                  size="icon"
+                  className="absolute right-2 bottom-2 h-8 w-8 rounded-full"
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf"
+              multiple
+              onChange={handleFileInputChange}
+              className="hidden"
+            />
+
+            <div className="flex justify-center items-center mt-2 text-xs text-muted-foreground">
+              <span>PDFs: {isAdmin ? `${pdfCount}/∞` : `${pdfCount}/3`} • Perguntas: {isAdmin ? `${questionCount}/∞` : `${questionCount}/5`} • Máx: 10MB</span>
+              {isUploading && <span className="ml-2">Enviando arquivo...</span>}
+            </div>
+          </div>
+        </div>
       </div>
 
       <ChatMessageDialog
