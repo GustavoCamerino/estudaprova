@@ -930,7 +930,7 @@ const Chat = () => {
 
   if (currentView !== 'chat') {
     return (
-      <div className="h-[calc(100vh-140px)] relative">
+      <div className="min-h-screen relative flex flex-col">
         <div
           className="fixed inset-0 opacity-5 pointer-events-none z-0"
           style={{
@@ -939,7 +939,7 @@ const Chat = () => {
             backgroundPosition: 'center'
           }}
         />
-        <div className="relative z-10 h-full overflow-y-auto">
+        <div className="relative z-10 flex-1 container mx-auto py-6">
           {renderContentView()}
         </div>
       </div>
@@ -948,7 +948,7 @@ const Chat = () => {
 
   return (
     <div 
-      className="h-[calc(100vh-80px)] flex gap-6 relative"
+      className="min-h-screen flex flex-col lg:flex-row gap-4 lg:gap-6 relative p-4 lg:p-6"
       onDragEnter={handleDrag}
       onDragLeave={handleDrag}
       onDragOver={handleDrag}
@@ -966,7 +966,7 @@ const Chat = () => {
       {/* Drag and Drop Overlay */}
       {dragActive && (
         <div className="fixed inset-0 bg-primary/10 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="bg-card/90 border-2 border-dashed border-primary rounded-lg p-8 text-center max-w-md">
+          <div className="bg-card/90 border-2 border-dashed border-primary rounded-lg p-8 text-center max-w-md mx-4">
             <Upload className="h-16 w-16 mx-auto mb-4 text-primary" />
             <h3 className="text-lg font-semibold mb-2">Solte o PDF aqui</h3>
             <p className="text-muted-foreground">Arraste e solte seu arquivo PDF para começar</p>
@@ -976,7 +976,7 @@ const Chat = () => {
       )}
 
       {/* Left Sidebar - Sessions and Quick Actions */}
-      <div className="w-80 flex-shrink-0 relative z-10 space-y-4">
+      <div className="w-full lg:w-80 lg:flex-shrink-0 relative z-10 space-y-4 lg:max-h-screen lg:overflow-y-auto">
         <div>
           <h1 className="text-2xl font-display font-bold mb-2 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
             Chat com IA
@@ -1154,10 +1154,10 @@ const Chat = () => {
       </div>
 
       {/* Main Chat Area - Centered and Larger */}
-      <div className="flex-1 relative z-10">
-        <Card className="h-full bg-card/80 backdrop-blur-sm border-primary/20">
+      <div className="flex-1 relative z-10 min-h-0">
+        <Card className="h-[calc(100vh-8rem)] lg:h-[calc(100vh-12rem)] bg-card/80 backdrop-blur-sm border-primary/20">
           <CardContent className="p-0 h-full flex flex-col">
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-4 min-h-0">
               {messages.length === 0 ? (
                 <div className="text-center text-muted-foreground py-20">
                   <Bot className="h-16 w-16 mx-auto mb-6 opacity-50" />
@@ -1222,7 +1222,7 @@ const Chat = () => {
             </div>
 
             {/* Input Area */}
-            <div className="border-t p-6">
+            <div className="border-t p-4 lg:p-6 flex-shrink-0">
               {/* Show selected PDF info */}
               {selectedPDFId && availablePDFs.length > 0 && (
                 <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
