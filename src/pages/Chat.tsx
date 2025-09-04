@@ -734,7 +734,7 @@ const Chat = () => {
 
   return (
     <div 
-      className="min-h-screen flex relative bg-background"
+      className="h-screen flex relative bg-background overflow-hidden"
       onDragEnter={handleDrag}
       onDragLeave={handleDrag}
       onDragOver={handleDrag}
@@ -753,9 +753,9 @@ const Chat = () => {
       )}
 
       {/* Left Sidebar - Dark Theme like ChatGPT */}
-      <div className="w-80 flex-shrink-0 bg-slate-900 dark:bg-slate-950 text-white flex flex-col h-screen overflow-hidden">
+      <div className="w-80 flex-shrink-0 bg-slate-900 dark:bg-slate-950 text-white flex flex-col h-full overflow-hidden">
         {/* Header */}
-        <div className="p-4 border-b border-slate-700">
+        <div className="p-4 border-b border-slate-700 flex-shrink-0">
           <h1 className="text-xl font-semibold text-white mb-2">
             Chat com IA
           </h1>
@@ -884,9 +884,9 @@ const Chat = () => {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col h-screen bg-background">
+      <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
         {/* Chat Header */}
-        <div className="border-b border-border p-4 bg-card/50">
+        <div className="border-b border-border p-4 bg-card/50 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold">Assistente de Estudos</h2>
@@ -897,7 +897,7 @@ const Chat = () => {
             {selectedPDFId && availablePDFs.length > 0 && (
               <div className="flex items-center space-x-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
                 <FileText className="h-4 w-4 text-blue-600" />
-                <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                <span className="text-sm font-medium text-blue-900 dark:text-blue-100 truncate max-w-48">
                   {availablePDFs.find(pdf => pdf.id === selectedPDFId)?.original_name}
                 </span>
               </div>
@@ -905,8 +905,8 @@ const Chat = () => {
           </div>
         </div>
 
-        {/* Chat Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* Chat Messages - Scrollable */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 min-h-0">
           {messages.length === 0 ? (
             <div className="text-center text-muted-foreground py-20">
               <Bot className="h-16 w-16 mx-auto mb-6 opacity-50" />
@@ -971,8 +971,8 @@ const Chat = () => {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Area */}
-        <div className="border-t border-border p-4 bg-card/50">
+        {/* Input Area - Fixed at bottom */}
+        <div className="border-t border-border p-4 bg-card/50 flex-shrink-0">
           {/* Show uploaded files */}
           {uploadedFiles.length > 0 && (
             <div className="mb-4 space-y-2">
@@ -1017,7 +1017,7 @@ const Chat = () => {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
                   placeholder="Digite sua mensagem (ex: 'crie flashcards', 'faça um resumo', 'gere um quiz')..."
-                  className="min-h-[60px] max-h-[200px] resize-none text-base pr-12 rounded-2xl border-2"
+                  className="min-h-[60px] max-h-[120px] resize-none text-base pr-12 rounded-2xl border-2"
                   disabled={isLoading}
                 />
                 <Button
