@@ -401,6 +401,33 @@
     visibility: visible !important;
   }
 
+  /* Prevent scroll jump when popups appear */
+  .prevent-scroll-jump {
+    position: fixed !important;
+    z-index: 100 !important;
+  }
+
+  /* Toast specific positioning to prevent layout shift */
+  [data-radix-toast-viewport] {
+    position: fixed !important;
+    top: 0 !important;
+    right: 0 !important;
+    z-index: 100 !important;
+    max-width: 420px !important;
+    margin: 0 !important;
+    padding: 1rem !important;
+    pointer-events: none !important;
+  }
+
+  [data-radix-toast-viewport] > * {
+    pointer-events: auto !important;
+  }
+
+  /* Prevent body scroll when toasts appear */
+  body:has([data-state="open"][data-radix-toast-root]) {
+    overflow: auto !important;
+  }
+
   /* Melhorar responsividade */
   .responsive-container {
     width: 100%;
