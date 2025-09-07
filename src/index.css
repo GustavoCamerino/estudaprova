@@ -401,7 +401,7 @@
     visibility: visible !important;
   }
 
-  /* Prevent scroll jump when popups appear */
+  /* Prevent scroll jump when popups appear - FIXED VERSION */
   .prevent-scroll-jump {
     position: fixed !important;
     z-index: 100 !important;
@@ -423,9 +423,22 @@
     pointer-events: auto !important;
   }
 
-  /* Prevent body scroll when toasts appear */
-  body:has([data-state="open"][data-radix-toast-root]) {
-    overflow: auto !important;
+  /* Prevent body scroll when ANY popup appears */
+  body:has([data-state="open"]) {
+    overflow: hidden !important;
+    position: fixed !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  /* Prevent scroll jump specifically for toasts, dialogs, and other popups */
+  body:has([data-radix-toast-root]),
+  body:has([data-radix-dialog-content]),
+  body:has([data-radix-popover-content]),
+  body:has([data-radix-hover-card-content]) {
+    position: fixed !important;
+    overflow: hidden !important;
+    width: 100% !important;
   }
 
   /* Melhorar responsividade */
