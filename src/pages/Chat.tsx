@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Send,
   FileText,
@@ -15,7 +16,9 @@ import {
   Zap,
   Upload,
   Crown,
-  MessageCircle
+  MessageCircle,
+  User,
+  Bot
 } from 'lucide-react';
 import FlashcardCarousel from '@/components/FlashcardCarousel';
 import ResumeViewer from '@/components/ResumeViewer';
@@ -32,6 +35,13 @@ interface PDFWithJSON {
   extracted_content?: string;
 }
 
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
+
 const Chat = () => {
   const { toast } = useToast();
   const { isAdmin, isPremium, userRole } = useUserRole();
@@ -43,10 +53,17 @@ const Chat = () => {
   const [isGenerating, setIsGenerating] = useState<string | null>(null);
   const [availablePDFs, setAvailablePDFs] = useState<PDFWithJSON[]>([]);
   const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     trackPageView('/chat');
   }, [trackPageView]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -218,10 +235,70 @@ const Chat = () => {
   };
 
   const handleSendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isLoading) return;
 
-    console.log('Sending message:', input);
+    const userMessage: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: input,
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
     setInput('');
+    setIsLoading(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuário não autenticado');
+
+      // Combine PDF content with user message
+      const pdfContext = availablePDFs
+        .map(pdf => `PDF: ${pdf.original_name}\nConteúdo: ${pdf.extracted_content || ''}`)
+        .join('\n\n');
+
+      const fullPrompt = pdfContext 
+        ? `Contexto dos PDFs:\n${pdfContext}\n\nPergunta do usuário: ${input}`
+        : input;
+
+      const { data: resp, error } = await supabase.functions.invoke('ai-processor', {
+        body: { 
+          action: 'chat', 
+          message: fullPrompt,
+          context: pdfContext ? 'pdf' : 'general'
+        }
+      });
+
+      if (error) throw new Error(error.message);
+      if (!resp?.success) throw new Error(resp?.error || 'Falha ao processar mensagem');
+
+      const assistantMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: resp.response,
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+
+    } catch (error) {
+      console.error('Chat error:', error);
+      const errorMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: 'Desculpe, ocorreu um erro ao processar sua mensagem. Tente novamente.',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      
+      toast({
+        title: "Erro no chat",
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (currentView === 'flashcard' && generatedContent?.type === 'flashcard') {
@@ -260,86 +337,169 @@ const Chat = () => {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-8">
-        {/* Welcome Icon */}
-        <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
-          <MessageCircle className="w-8 h-8 text-primary" />
-        </div>
+      <div className="flex-1 flex flex-col">
+        {messages.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-8">
+            {/* Welcome Icon */}
+            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+              <MessageCircle className="w-8 h-8 text-primary" />
+            </div>
 
-        {/* Welcome Text */}
-        <div className="text-center space-y-2 max-w-md">
-          <h2 className="text-2xl font-semibold">Bem-vindo ao Chat AI!</h2>
-          <p className="text-muted-foreground">
-            Envie seus PDFs e comece a fazer perguntas sobre o conteúdo. 
-            Posso criar flashcards, resumos, quizzes e muito mais!
-          </p>
-        </div>
-
-        {/* Upload Area */}
-        <div 
-          {...getRootProps()} 
-          className={`w-full max-w-md p-8 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
-            isDragActive 
-              ? 'border-primary bg-primary/5' 
-              : 'border-border hover:border-primary/50'
-          }`}
-        >
-          <input {...getInputProps()} />
-          <div className="text-center space-y-4">
-            <Upload className="w-12 h-12 text-primary mx-auto" />
-            <div>
-              <Button className="w-full">
-                {isExtracting ? 'Processando...' : 'Enviar PDF'}
-              </Button>
-              <p className="text-xs text-muted-foreground mt-2">
-                Ou arraste e solte seu arquivo aqui
+            {/* Welcome Text */}
+            <div className="text-center space-y-2 max-w-md">
+              <h2 className="text-2xl font-semibold">Bem-vindo ao Chat AI!</h2>
+              <p className="text-muted-foreground">
+                Envie seus PDFs e comece a fazer perguntas sobre o conteúdo. 
+                Posso criar flashcards, resumos, quizzes e muito mais!
               </p>
             </div>
-          </div>
-        </div>
 
-        {/* Action Buttons */}
-        <div className="grid grid-cols-2 gap-4 w-full max-w-md">
-          <Button
-            variant="outline"
-            className="flex items-center gap-2 h-12"
-            onClick={() => generateContent('flashcard')}
-            disabled={!!isGenerating || availablePDFs.length === 0}
-          >
-            <Brain className="w-4 h-4" />
-            {isGenerating === 'flashcard' ? 'Criando...' : 'Criar Flashcards'}
-          </Button>
-          
-          <Button
-            variant="outline"
-            className="flex items-center gap-2 h-12"
-            onClick={() => generateContent('resume')}
-            disabled={!!isGenerating || availablePDFs.length === 0}
-          >
-            <FileText className="w-4 h-4" />
-            {isGenerating === 'resume' ? 'Fazendo...' : 'Fazer Resumo'}
-          </Button>
-          
-          <Button
-            variant="outline"
-            className="flex items-center gap-2 h-12"
-            onClick={() => generateContent('quiz')}
-            disabled={!!isGenerating || availablePDFs.length === 0}
-          >
-            <HelpCircle className="w-4 h-4" />
-            {isGenerating === 'quiz' ? 'Criando...' : 'Criar Quiz'}
-          </Button>
-          
-          <Button
-            variant="outline"
-            className="flex items-center gap-2 h-12"
-            onClick={() => generateContent('prova')}
-            disabled={!!isGenerating || availablePDFs.length === 0}
-          >
-            <Zap className="w-4 h-4" />
-            {isGenerating === 'prova' ? 'Gerando...' : 'Gerar Prova'}
-          </Button>
-        </div>
+            {/* Upload Area */}
+            <div 
+              {...getRootProps()} 
+              className={`w-full max-w-md p-8 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+                isDragActive 
+                  ? 'border-primary bg-primary/5' 
+                  : 'border-border hover:border-primary/50'
+              }`}
+            >
+              <input {...getInputProps()} />
+              <div className="text-center space-y-4">
+                <Upload className="w-12 h-12 text-primary mx-auto" />
+                <div>
+                  <Button className="w-full">
+                    {isExtracting ? 'Processando...' : 'Enviar PDF'}
+                  </Button>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Ou arraste e solte seu arquivo aqui
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="grid grid-cols-2 gap-4 w-full max-w-md">
+              <Button
+                variant="outline"
+                className="flex items-center gap-2 h-12"
+                onClick={() => generateContent('flashcard')}
+                disabled={!!isGenerating || availablePDFs.length === 0}
+              >
+                <Brain className="w-4 h-4" />
+                {isGenerating === 'flashcard' ? 'Criando...' : 'Criar Flashcards'}
+              </Button>
+              
+              <Button
+                variant="outline"
+                className="flex items-center gap-2 h-12"
+                onClick={() => generateContent('resume')}
+                disabled={!!isGenerating || availablePDFs.length === 0}
+              >
+                <FileText className="w-4 h-4" />
+                {isGenerating === 'resume' ? 'Fazendo...' : 'Fazer Resumo'}
+              </Button>
+              
+              <Button
+                variant="outline"
+                className="flex items-center gap-2 h-12"
+                onClick={() => generateContent('quiz')}
+                disabled={!!isGenerating || availablePDFs.length === 0}
+              >
+                <HelpCircle className="w-4 h-4" />
+                {isGenerating === 'quiz' ? 'Criando...' : 'Criar Quiz'}
+              </Button>
+              
+              <Button
+                variant="outline"
+                className="flex items-center gap-2 h-12"
+                onClick={() => generateContent('prova')}
+                disabled={!!isGenerating || availablePDFs.length === 0}
+              >
+                <Zap className="w-4 h-4" />
+                {isGenerating === 'prova' ? 'Gerando...' : 'Gerar Prova'}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <ScrollArea className="flex-1 px-4">
+            <div className="max-w-4xl mx-auto space-y-4 py-4">
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`flex items-start space-x-3 ${
+                    message.role === 'user' ? 'justify-end' : 'justify-start'
+                  }`}
+                >
+                  {message.role === 'assistant' && (
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <Bot className="w-4 h-4 text-primary" />
+                    </div>
+                  )}
+                  
+                  <div
+                    className={`max-w-[80%] p-3 rounded-lg ${
+                      message.role === 'user'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-card border border-border'
+                    }`}
+                  >
+                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                    <div className={`text-xs mt-1 opacity-70 ${
+                      message.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                    }`}>
+                      {message.timestamp.toLocaleTimeString()}
+                    </div>
+                  </div>
+                  
+                  {message.role === 'user' && (
+                    <div className="w-8 h-8 rounded-full bg-secondary/10 flex items-center justify-center flex-shrink-0">
+                      <User className="w-4 h-4 text-secondary-foreground" />
+                    </div>
+                  )}
+                </div>
+              ))}
+              
+              {isLoading && (
+                <div className="flex items-start space-x-3">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <Bot className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="bg-card border border-border p-3 rounded-lg">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <div ref={messagesEndRef} />
+            </div>
+          </ScrollArea>
+        )}
+
+        {/* Upload Area for Chat Mode */}
+        {messages.length > 0 && availablePDFs.length === 0 && (
+          <div className="px-4 pb-4">
+            <div 
+              {...getRootProps()} 
+              className={`w-full p-4 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+                isDragActive 
+                  ? 'border-primary bg-primary/5' 
+                  : 'border-border hover:border-primary/50'
+              }`}
+            >
+              <input {...getInputProps()} />
+              <div className="flex items-center justify-center space-x-2">
+                <Upload className="w-5 h-5 text-primary" />
+                <span className="text-sm text-muted-foreground">
+                  {isExtracting ? 'Processando PDF...' : 'Clique ou arraste um PDF aqui'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Input Area */}
@@ -348,18 +508,35 @@ const Chat = () => {
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Digite sua pergunta sobre os PDFs..."
+            placeholder={
+              availablePDFs.length > 0 
+                ? "Digite sua pergunta sobre os PDFs..." 
+                : "Faça uma pergunta ou envie um PDF primeiro..."
+            }
             className="flex-1"
-            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-            disabled={availablePDFs.length === 0}
+            onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+            disabled={isLoading}
           />
           <Button 
             onClick={handleSendMessage}
-            disabled={!input.trim() || availablePDFs.length === 0}
+            disabled={!input.trim() || isLoading}
           >
-            <Send className="w-4 h-4" />
+            {isLoading ? (
+              <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
           </Button>
         </div>
+        
+        {availablePDFs.length > 0 && (
+          <div className="mt-2 max-w-4xl mx-auto">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <FileText className="w-3 h-3" />
+              <span>PDFs carregados: {availablePDFs.map(pdf => pdf.original_name).join(', ')}</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
