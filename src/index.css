@@ -147,6 +147,21 @@
     min-height: 100vh;
     width: 100%;
     overflow-x: hidden;
+    /* Prevenir scroll automático quando pop-ups aparecem */
+    scroll-behavior: auto !important;
+  }
+
+  /* Prevenir scroll automático em pop-ups/toasts */
+  body:has([data-state="open"]) {
+    scroll-behavior: auto !important;
+  }
+
+  /* Fixar viewport quando modais estão abertos */
+  body[data-scroll-locked] {
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    height: 100%;
   }
 
   #root {
@@ -321,6 +336,24 @@
 
 @layer utilities {
 
+  /* Prevenir scroll automático em pop-ups */
+  .prevent-scroll-jump {
+    scroll-behavior: auto !important;
+    scroll-snap-type: none;
+  }
+
+  .no-scroll-behavior {
+    scroll-behavior: auto !important;
+  }
+
+  /* Fixar posição durante pop-ups */
+  .modal-open {
+    overflow: hidden !important;
+    position: fixed !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
+
   /* Container utilities */
   .container-custom {
     @apply container mx-auto px-4 sm:px-6 lg:px-8;
@@ -399,22 +432,6 @@
   .visible {
     opacity: 1 !important;
     visibility: visible !important;
-  }
-
-  /* Toast positioning to prevent scroll jump */
-  [data-radix-toast-viewport] {
-    position: fixed !important;
-    top: 0 !important;
-    right: 0 !important;
-    z-index: 100 !important;
-    max-width: 420px !important;
-    margin: 0 !important;
-    padding: 1rem !important;
-    pointer-events: none !important;
-  }
-
-  [data-radix-toast-viewport] > * {
-    pointer-events: auto !important;
   }
 
   /* Melhorar responsividade */
