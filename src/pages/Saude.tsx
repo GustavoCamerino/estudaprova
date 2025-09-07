@@ -6,11 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-    Droplets, Moon, Salad, Dumbbell, StretchHorizontal, Brain, Bell, Plus, Utensils, TrendingUp, Loader2
+    Droplets, Moon, Salad, Dumbbell, StretchHorizontal, Brain, Bell, Plus, Utensils, TrendingUp
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import {
