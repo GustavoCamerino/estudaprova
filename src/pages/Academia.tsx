@@ -282,27 +282,34 @@ const Academia = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-background/80">
       {/* Header */}
-      <div className="bg-gradient-to-r from-primary via-primary to-secondary p-6 rounded-b-3xl mb-6">
-        <div className="container mx-auto">
-          <h1 className="text-3xl font-bold text-white mb-2">Academia & Saúde</h1>
-          <p className="text-white/90">Gerencie seus treinos e hábitos saudáveis</p>
+      <div className="bg-gradient-to-r from-primary via-primary to-secondary p-4 md:p-6 rounded-b-3xl mb-6">
+        <div className="container-custom">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <h1 className="text-2xl md:text-3xl font-bold text-white flex items-center gap-2">
+              <Dumbbell className="w-6 h-6 md:w-8 md:h-8" />
+              Academia & Saúde
+            </h1>
+            <Badge variant="secondary" className="text-xs md:text-sm w-fit">
+              Plano de Treinos Personalizado
+            </Badge>
+          </div>
         </div>
       </div>
 
-      <div className="container mx-auto p-4 space-y-6">
+      <div className="container-custom space-y-6">
         <Tabs value={selectedTab} onValueChange={setSelectedTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-6">
-            <TabsTrigger value="treinos" className="flex items-center gap-2">
+          <TabsList className="grid w-full grid-cols-3 mb-6 h-auto">
+            <TabsTrigger value="treinos" className="flex items-center gap-2 py-3 px-4 text-sm">
               <Dumbbell className="w-4 h-4" />
-              Treinos
+              <span className="hidden sm:inline">Treinos</span>
             </TabsTrigger>
-            <TabsTrigger value="habitos" className="flex items-center gap-2">
+            <TabsTrigger value="habitos" className="flex items-center gap-2 py-3 px-4 text-sm">
               <Heart className="w-4 h-4" />
-              Hábitos
+              <span className="hidden sm:inline">Hábitos</span>
             </TabsTrigger>
-            <TabsTrigger value="progresso" className="flex items-center gap-2">
+            <TabsTrigger value="progresso" className="flex items-center gap-2 py-3 px-4 text-sm">
               <Target className="w-4 h-4" />
-              Progresso
+              <span className="hidden sm:inline">Progresso</span>
             </TabsTrigger>
           </TabsList>
 
@@ -403,7 +410,7 @@ const Academia = () => {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                 {workouts.map((workout) => {
                   const todaySession = sessions.find(s => s.workout_id === workout.id);
                   const isCompleted = todaySession?.completed || false;
