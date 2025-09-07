@@ -27,12 +27,10 @@ import ExamInterface from '@/components/ExamInterface';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 
-interface PDFWithJSON {
-  id: string;
-  original_name: string;
-  processing_status: string;
-  json_content?: any;
-  extracted_content?: string;
+interface PDFContent {
+  name: string;
+  text: string;
+  pages: number;
 }
 
 interface ChatMessage {
@@ -49,9 +47,8 @@ const Chat = () => {
   const { extractTextFromPDF, isExtracting } = usePDFExtractor();
   const [currentView, setCurrentView] = useState<'chat' | 'flashcard' | 'resume' | 'quiz' | 'prova'>('chat');
   const [generatedContent, setGeneratedContent] = useState<any>(null);
-  const [pdfCount, setPdfCount] = useState(0);
   const [isGenerating, setIsGenerating] = useState<string | null>(null);
-  const [availablePDFs, setAvailablePDFs] = useState<PDFWithJSON[]>([]);
+  const [pdfContent, setPdfContent] = useState<PDFContent | null>(null);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -90,7 +87,7 @@ const Chat = () => {
     }
 
     try {
-      console.log('🔄 Extraindo texto do PDF automaticamente...');
+      console.log('🔄 Extraindo texto do PDF...');
       const extractedData = await extractTextFromPDF(file);
       
       if (!extractedData) {
@@ -99,46 +96,13 @@ const Chat = () => {
 
       console.log(`✅ Texto extraído: ${extractedData.text.length} caracteres de ${extractedData.pages} páginas`);
 
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
-        throw new Error('Usuário não autenticado');
-      }
+      // Store PDF content in memory only
+      setPdfContent({
+        name: file.name,
+        text: extractedData.text,
+        pages: extractedData.pages
+      });
 
-      // Upload file to Supabase Storage
-      const fileName = `${user.id}/${Date.now()}-${file.name}`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('pdfs')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
-
-      if (uploadError) {
-        throw new Error(`Erro no upload: ${uploadError.message}`);
-      }
-
-      // Save to database
-      const { data: dbData, error: dbError } = await supabase
-        .from('pdfs')
-        .insert({
-          user_id: user.id,
-          filename: fileName,
-          original_name: file.name,
-          file_path: uploadData.path,
-          file_size: file.size,
-          processing_status: 'completed',
-          extracted_content: extractedData.text
-        })
-        .select()
-        .single();
-
-      if (dbError) {
-        await supabase.storage.from('pdfs').remove([fileName]);
-        throw new Error(`Erro ao salvar no banco: ${dbError.message}`);
-      }
-
-      setPdfCount(prev => prev + 1);
-      setAvailablePDFs(prev => [...prev, dbData]);
       trackUpload('pdf', '/chat');
 
       toast({
@@ -147,7 +111,7 @@ const Chat = () => {
       });
 
     } catch (error) {
-      console.error('Upload error:', error);
+      console.error('PDF processing error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       
       toast({
@@ -168,7 +132,7 @@ const Chat = () => {
   });
 
   const generateContent = async (type: 'flashcard' | 'resume' | 'quiz' | 'prova') => {
-    if (availablePDFs.length === 0) {
+    if (!pdfContent) {
       toast({
         title: "Nenhum PDF encontrado",
         description: "Por favor, envie um PDF primeiro.",
@@ -180,30 +144,19 @@ const Chat = () => {
     setIsGenerating(type);
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Usuário não autenticado');
-
-      const pdfContent = availablePDFs
-        .map(pdf => pdf.extracted_content || '')
-        .join('\n\n');
-
-      if (!pdfContent.trim()) {
-        throw new Error('Nenhum conteúdo de PDF disponível');
-      }
-
       let prompt = '';
       switch (type) {
         case 'flashcard':
-          prompt = `Crie flashcards baseados no conteúdo: ${pdfContent.substring(0, 2000)}...`;
+          prompt = `Crie flashcards baseados no conteúdo do PDF "${pdfContent.name}": ${pdfContent.text.substring(0, 3000)}...`;
           break;
         case 'resume':
-          prompt = `Faça um resumo detalhado do conteúdo: ${pdfContent.substring(0, 2000)}...`;
+          prompt = `Faça um resumo detalhado do PDF "${pdfContent.name}": ${pdfContent.text.substring(0, 3000)}...`;
           break;
         case 'quiz':
-          prompt = `Crie um quiz com 10 questões baseado no conteúdo: ${pdfContent.substring(0, 2000)}...`;
+          prompt = `Crie um quiz com 10 questões baseado no PDF "${pdfContent.name}": ${pdfContent.text.substring(0, 3000)}...`;
           break;
         case 'prova':
-          prompt = `Gere uma prova completa com questões múltipla escolha e dissertativas: ${pdfContent.substring(0, 2000)}...`;
+          prompt = `Gere uma prova completa com questões múltipla escolha e dissertativas baseada no PDF "${pdfContent.name}": ${pdfContent.text.substring(0, 3000)}...`;
           break;
       }
 
@@ -219,7 +172,7 @@ const Chat = () => {
 
       toast({
         title: "Conteúdo gerado com sucesso!",
-        description: `${type} criado com base nos seus PDFs.`,
+        description: `${type} criado com base no seu PDF.`,
       });
 
     } catch (error) {
@@ -249,23 +202,16 @@ const Chat = () => {
     setIsLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Usuário não autenticado');
-
-      // Combine PDF content with user message
-      const pdfContext = availablePDFs
-        .map(pdf => `PDF: ${pdf.original_name}\nConteúdo: ${pdf.extracted_content || ''}`)
-        .join('\n\n');
-
-      const fullPrompt = pdfContext 
-        ? `Contexto dos PDFs:\n${pdfContext}\n\nPergunta do usuário: ${input}`
+      // Create prompt with PDF context if available
+      const contextPrompt = pdfContent 
+        ? `Contexto do PDF "${pdfContent.name}" (${pdfContent.pages} páginas):\n${pdfContent.text}\n\nPergunta do usuário: ${input}`
         : input;
 
       const { data: resp, error } = await supabase.functions.invoke('ai-processor', {
         body: { 
           action: 'chat', 
-          message: fullPrompt,
-          context: pdfContext ? 'pdf' : 'general'
+          message: contextPrompt,
+          context: pdfContent ? 'pdf' : 'general'
         }
       });
 
@@ -332,7 +278,7 @@ const Chat = () => {
           )}
         </div>
         <div className="text-sm text-muted-foreground">
-          PDFs: {pdfCount}/3
+          {pdfContent ? `PDF: ${pdfContent.name} (${pdfContent.pages} páginas)` : 'Nenhum PDF carregado'}
         </div>
       </div>
 
@@ -383,7 +329,7 @@ const Chat = () => {
                 variant="outline"
                 className="flex items-center gap-2 h-12"
                 onClick={() => generateContent('flashcard')}
-                disabled={!!isGenerating || availablePDFs.length === 0}
+                disabled={!!isGenerating || !pdfContent}
               >
                 <Brain className="w-4 h-4" />
                 {isGenerating === 'flashcard' ? 'Criando...' : 'Criar Flashcards'}
@@ -393,7 +339,7 @@ const Chat = () => {
                 variant="outline"
                 className="flex items-center gap-2 h-12"
                 onClick={() => generateContent('resume')}
-                disabled={!!isGenerating || availablePDFs.length === 0}
+                disabled={!!isGenerating || !pdfContent}
               >
                 <FileText className="w-4 h-4" />
                 {isGenerating === 'resume' ? 'Fazendo...' : 'Fazer Resumo'}
@@ -403,7 +349,7 @@ const Chat = () => {
                 variant="outline"
                 className="flex items-center gap-2 h-12"
                 onClick={() => generateContent('quiz')}
-                disabled={!!isGenerating || availablePDFs.length === 0}
+                disabled={!!isGenerating || !pdfContent}
               >
                 <HelpCircle className="w-4 h-4" />
                 {isGenerating === 'quiz' ? 'Criando...' : 'Criar Quiz'}
@@ -413,7 +359,7 @@ const Chat = () => {
                 variant="outline"
                 className="flex items-center gap-2 h-12"
                 onClick={() => generateContent('prova')}
-                disabled={!!isGenerating || availablePDFs.length === 0}
+                disabled={!!isGenerating || !pdfContent}
               >
                 <Zap className="w-4 h-4" />
                 {isGenerating === 'prova' ? 'Gerando...' : 'Gerar Prova'}
@@ -480,7 +426,7 @@ const Chat = () => {
         )}
 
         {/* Upload Area for Chat Mode */}
-        {messages.length > 0 && availablePDFs.length === 0 && (
+        {messages.length > 0 && !pdfContent && (
           <div className="px-4 pb-4">
             <div 
               {...getRootProps()} 
@@ -509,8 +455,8 @@ const Chat = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
-              availablePDFs.length > 0 
-                ? "Digite sua pergunta sobre os PDFs..." 
+              pdfContent 
+                ? "Digite sua pergunta sobre o PDF..." 
                 : "Faça uma pergunta ou envie um PDF primeiro..."
             }
             className="flex-1"
@@ -529,11 +475,11 @@ const Chat = () => {
           </Button>
         </div>
         
-        {availablePDFs.length > 0 && (
+        {pdfContent && (
           <div className="mt-2 max-w-4xl mx-auto">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <FileText className="w-3 h-3" />
-              <span>PDFs carregados: {availablePDFs.map(pdf => pdf.original_name).join(', ')}</span>
+              <span>PDF carregado: {pdfContent.name} ({pdfContent.pages} páginas, {pdfContent.text.length} caracteres)</span>
             </div>
           </div>
         )}
