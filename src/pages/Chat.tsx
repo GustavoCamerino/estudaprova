@@ -1198,7 +1198,7 @@ Certifique-se de que:
 
   if (currentView !== 'chat') {
     return (
-      <div className="h-[calc(100vh-140px)] relative">
+      <div data-page="chat" className="chat-fixed-container relative">
         <div
           className="fixed inset-0 opacity-5 pointer-events-none z-0"
           style={{
@@ -1216,7 +1216,8 @@ Certifique-se de que:
 
   return (
     <div 
-      className="h-[calc(100vh-80px)] flex gap-6 relative"
+      data-page="chat"
+      className="chat-fixed-container flex gap-6 relative"
       onDragEnter={handleDrag}
       onDragLeave={handleDrag}
       onDragOver={handleDrag}
